@@ -1,0 +1,44 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background: green circle with subtle shadow -->
+  <defs>
+    <radialGradient id="bg" cx="0.4" cy="0.4" r="0.7">
+      <stop offset="0%" stop-color="#66bb6a"/>
+      <stop offset="100%" stop-color="#2e7d32"/>
+    </radialGradient>
+    <linearGradient id="mask" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#0f0f1a"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="url(#bg)"/>
+  <!-- Domino / masquerade mask shape -->
+  <path d="
+    M 22 56
+    Q 22 44 36 44
+    L 52 44
+    Q 58 44 62 49
+    L 64 51
+    L 66 49
+    Q 70 44 76 44
+    L 92 44
+    Q 106 44 106 56
+    L 106 70
+    Q 106 84 92 84
+    L 80 84
+    Q 70 84 65 76
+    L 64 74
+    L 63 76
+    Q 58 84 48 84
+    L 36 84
+    Q 22 84 22 70
+    Z"
+    fill="url(#mask)"
+    stroke="#fff"
+    stroke-width="2"
+    stroke-linejoin="round"/>
+  <!-- Eye holes (rounded almond shape) -->
+  <ellipse cx="42" cy="63" rx="8" ry="5" fill="#66bb6a"/>
+  <ellipse cx="86" cy="63" rx="8" ry="5" fill="#66bb6a"/>
+  <!-- Small highlight on mask -->
+  <path d="M 32 50 Q 38 47 46 47" stroke="#ffffff44" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>

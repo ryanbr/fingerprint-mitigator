@@ -1,0 +1,15 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "lint:ext": "node scripts/prepare-ext.js && web-ext lint --source-dir=build-tmp",
+    "lint:all": "npm run lint && npm run lint:ext"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "@eslint/js": "^9.0.0",
+    "web-ext": "^8.0.0"
+  }
+}

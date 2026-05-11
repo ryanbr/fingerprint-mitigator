@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --panel: #16213e;
+      --border: #0f3460;
+      --text: #e0e0e0;
+      --text-dim: #b0bec5;
+      --text-faint: #78909c;
+      --accent: #43a047;
+      --accent-bright: #66bb6a;
+      --high: #ef5350;
+      --shadow: #00000066;
+    }
+    body.light {
+      --bg: #f5f5f8;
+      --panel: #ffffff;
+      --border: #b0b8c4;
+      --text: #1a1a2e;
+      --text-dim: #3a4254;
+      --text-faint: #6a7488;
+      --accent: #2e7d32;
+      --accent-bright: #43a047;
+      --high: #d32f2f;
+      --shadow: #00000033;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 340px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 15px;
+      color: var(--text);
+      background: var(--bg);
+    }
+    header {
+      padding: 12px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--accent);
+      flex: 1;
+    }
+    .theme-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 4px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .theme-btn:hover { background: var(--border); color: var(--text); }
+
+    .status-block {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .status-block .site {
+      font-size: 13px;
+      color: var(--text-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .status-block .url {
+      font-family: Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 14px;
+      color: var(--text-dim);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toggle-row {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .toggle-row .label {
+      flex: 1;
+      font-weight: 600;
+    }
+    .toggle-row .desc {
+      font-size: 13px;
+      color: var(--text-faint);
+      margin-top: 3px;
+      font-weight: 400;
+    }
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      background: var(--border);
+      border-radius: 11px;
+      cursor: pointer;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .toggle::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.15s;
+      box-shadow: 0 1px 3px var(--shadow);
+    }
+    .toggle.on { background: var(--accent); }
+    .toggle.on::after { transform: translateX(18px); }
+
+    .sub-toggle { padding-left: 26px; }
+    .sub-toggle .label { font-size: 14px; font-weight: 500; }
+    .sub-toggle .desc { font-size: 12px; }
+    .sub-toggle .toggle { width: 32px; height: 18px; border-radius: 9px; }
+    .sub-toggle .toggle::after { width: 14px; height: 14px; }
+    .sub-toggle .toggle.on::after { transform: translateX(14px); }
+    body.master-off .sub-toggle {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+    /* Visual indicator for categories with non-default settings on the
+       current site. Left-edge stripe + subtle background tint. */
+    .toggle-row.modified {
+      box-shadow: inset 4px 0 0 var(--accent);
+      background: rgba(67, 160, 71, 0.08);
+    }
+    body.light .toggle-row.modified {
+      background: rgba(46, 125, 50, 0.06);
+    }
+    .expand-row.modified .label { color: var(--accent); }
+    .toggle-row.modified + .expand-content {
+      box-shadow: inset 4px 0 0 var(--accent);
+      background: rgba(67, 160, 71, 0.04);
+    }
+    body.light .toggle-row.modified + .expand-content {
+      background: rgba(46, 125, 50, 0.03);
+    }
+
+    /* Expandable category rows */
+    .expand-row { cursor: pointer; }
+    .expand-row .label { display: flex; align-items: center; gap: 4px; }
+    .expand-row .caret {
+      display: inline-block;
+      width: 10px;
+      transition: transform 0.15s;
+      color: var(--text-faint);
+    }
+    .expand-row.open .caret { transform: rotate(90deg); }
+    .expand-content {
+      display: none;
+      padding: 0 16px 10px 42px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .expand-row.open + .expand-content { display: block; }
+    .sub-check-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      font-size: 13px;
+    }
+    .sub-check-row .sub-check-label { flex: 1; }
+    .sub-check-row .toggle {
+      width: 28px; height: 16px; border-radius: 8px;
+    }
+    .sub-check-row .toggle::after { width: 12px; height: 12px; }
+    .sub-check-row .toggle.on::after { transform: translateX(12px); }
+    .sub-check-row input[type="text"],
+    .sub-check-row input[type="number"] {
+      width: 72px;
+      padding: 2px 5px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+      font-family: Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    .sub-check-row select {
+      padding: 2px 5px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .info-section {
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--text-faint);
+      line-height: 1.5;
+    }
+    .info-section strong { color: var(--text-dim); }
+    .info-section ul {
+      margin: 6px 0 0 18px;
+      padding: 0;
+    }
+    .info-section li {
+      margin: 2px 0;
+    }
+    .info-section button {
+      flex: 1;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .info-section button:hover { background: var(--border); }
+    .info-section button:disabled { opacity: 0.4; cursor: default; }
+
+    footer {
+      padding: 8px 16px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-faint);
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round">
+      <path d="M 3 11 Q 3 8 6 8 L 9 8 Q 10.5 8 11.5 9.5 L 12 10 L 12.5 9.5 Q 13.5 8 15 8 L 18 8 Q 21 8 21 11 L 21 13 Q 21 16 18 16 L 16 16 Q 13 16 12.5 14.5 L 12 14 L 11.5 14.5 Q 11 16 8 16 L 6 16 Q 3 16 3 13 Z"/>
+      <circle cx="7.5" cy="12" r="1" fill="currentColor" stroke="none"/>
+      <circle cx="16.5" cy="12" r="1" fill="currentColor" stroke="none"/>
+    </svg>
+    <h1>Fingerprint Mitigator</h1>
+    <button class="theme-btn" id="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle theme">
+      <svg id="theme-icon-dark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg id="theme-icon-light" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+        <circle cx="12" cy="12" r="5"/>
+        <line x1="12" y1="1" x2="12" y2="3"/>
+        <line x1="12" y1="21" x2="12" y2="23"/>
+      </svg>
+    </button>
+  </header>
+
+  <div class="status-block">
+    <div class="site">Current site</div>
+    <div class="url" id="site-url">(loading…)</div>
+  </div>
+
+  <div class="toggle-row">
+    <div style="flex:1">
+      <div class="label" style="margin-bottom:4px">Browser preset</div>
+      <div class="desc" style="margin-bottom:6px">Picking a preset overwrites UA / Sec-CH-UA / WebGL / etc. for this site.</div>
+      <select id="preset-selector" style="width:100%; padding:4px 6px; font-size:13px; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:4px">
+        <option value="">— Apply a preset —</option>
+        <optgroup label="Chrome">
+          <option value="chrome-148-win">Chrome 148 / Windows</option>
+          <option value="chrome-148-mac">Chrome 148 / macOS</option>
+          <option value="chrome-148-linux">Chrome 148 / Linux</option>
+          <option value="chrome-148-android">Chrome 148 / Android (mobile)</option>
+        </optgroup>
+        <optgroup label="Edge">
+          <option value="edge-148-win">Edge 148 / Windows</option>
+        </optgroup>
+        <optgroup label="Firefox">
+          <option value="firefox-142-win">Firefox 142 / Windows</option>
+          <option value="firefox-142-mac">Firefox 142 / macOS</option>
+        </optgroup>
+        <optgroup label="Safari">
+          <option value="safari-17-mac">Safari 17 / macOS</option>
+        </optgroup>
+      </select>
+    </div>
+  </div>
+
+  <div class="toggle-row">
+    <div>
+      <div class="label">Mask on this site</div>
+      <div class="desc">Master switch. Turning off disables everything for this site.</div>
+    </div>
+    <div class="toggle" id="site-toggle" role="switch" aria-checked="true" tabindex="0"></div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="identity">
+    <div>
+      <div class="label"><span class="caret">▶</span> Identity masking</div>
+      <div class="desc"><code>navigator.brave</code>, brands, vendor globals, UA tokens</div>
+    </div>
+    <div class="toggle" id="cat-identity" role="switch" aria-checked="true" tabindex="0" data-category="identity"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label">Hide <code>navigator.brave</code></span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="identity.brave"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Filter <code>userAgentData.brands</code></span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="identity.brands"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Hide vendor globals (<code>opr</code>, <code>vivaldi</code>, <code>yandex</code>, …)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="identity.vendorGlobals"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Strip <code>userAgent</code> identity tokens</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="identity.uaStrip"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Custom <code>userAgent</code></span>
+      <input type="text" data-value-key="identity.customUA" placeholder="(strip mode)" style="width:200px">
+    </div>
+    <div class="sub-check-row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:4px">
+      <span class="sub-check-label" style="font-weight:600">High-entropy userAgentData</span>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>platformVersion</code></span>
+      <input type="text" value="15.0.0" data-value-key="uaData.platformVersion" style="width:100px">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>architecture</code></span>
+      <select data-value-key="uaData.architecture">
+        <option value="x86" selected>x86</option>
+        <option value="arm">arm</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>bitness</code></span>
+      <select data-value-key="uaData.bitness">
+        <option value="64" selected>64</option>
+        <option value="32">32</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>model</code></span>
+      <input type="text" value="" data-value-key="uaData.model" placeholder="(empty for desktop)" style="width:120px">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>uaFullVersion</code></span>
+      <input type="text" value="148.0.0.0" data-value-key="uaData.uaFullVersion" style="width:100px">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>wow64</code></span>
+      <select data-value-key="uaData.wow64">
+        <option value="false" selected>false</option>
+        <option value="true">true</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>formFactor</code></span>
+      <input type="text" value="Desktop" data-value-key="uaData.formFactor" placeholder="comma-separated" style="width:140px">
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="clientHints">
+    <div>
+      <div class="label"><span class="caret">▶</span> Client Hints (HTTP)</div>
+      <div class="desc">Rewrite <code>Sec-CH-UA*</code> headers</div>
+    </div>
+    <div class="toggle" id="cat-clientHints" role="switch" aria-checked="true" tabindex="0" data-category="clientHints"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>Sec-CH-UA</code></span>
+      <input type="text" data-value-key="clientHints.brand" style="width:180px" value='"Google Chrome";v="148", "Chromium";v="148", "Not_A Brand";v="24"'>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>Sec-CH-UA-Mobile</code></span>
+      <select data-value-key="clientHints.mobile">
+        <option value="" selected>(pass through)</option>
+        <option value="?0">?0 (desktop)</option>
+        <option value="?1">?1 (mobile)</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>Sec-CH-UA-Platform</code></span>
+      <select data-value-key="clientHints.platform">
+        <option value="" selected>(pass through)</option>
+        <option value='"Windows"'>"Windows"</option>
+        <option value='"macOS"'>"macOS"</option>
+        <option value='"Linux"'>"Linux"</option>
+        <option value='"Android"'>"Android"</option>
+        <option value='"iOS"'>"iOS"</option>
+        <option value='"Chrome OS"'>"Chrome OS"</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="canvas">
+    <div>
+      <div class="label"><span class="caret">▶</span> Canvas fingerprinting</div>
+      <div class="desc"><code>toDataURL</code>, <code>toBlob</code>, <code>getImageData</code>. May break captchas / image editors.</div>
+    </div>
+    <div class="toggle" id="cat-canvas" role="switch" aria-checked="true" tabindex="0" data-category="canvas"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label">Mode</span>
+      <select data-value-key="canvas.mode">
+        <option value="off" selected>off (passthrough)</option>
+        <option value="stabilize">stabilize (cache reads)</option>
+        <option value="block">block (1×1 PNG / SecurityError)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="audio">
+    <div>
+      <div class="label"><span class="caret">▶</span> Audio fingerprinting</div>
+      <div class="desc"><code>AudioBuffer</code>, <code>AnalyserNode</code>, <code>OfflineAudioContext</code>. May break audio analyzers / voice apps.</div>
+    </div>
+    <div class="toggle" id="cat-audio" role="switch" aria-checked="true" tabindex="0" data-category="audio"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label">Mode</span>
+      <select data-value-key="audio.mode">
+        <option value="off" selected>off (passthrough)</option>
+        <option value="stabilize">stabilize (cache reads)</option>
+        <option value="block">block (silent)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="webgl">
+    <div>
+      <div class="label"><span class="caret">▶</span> WebGL renderer</div>
+      <div class="desc">Spoof <code>UNMASKED_VENDOR_WEBGL</code> / <code>UNMASKED_RENDERER_WEBGL</code></div>
+    </div>
+    <div class="toggle" id="cat-webgl" role="switch" aria-checked="true" tabindex="0" data-category="webgl"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label">Vendor</span>
+      <input type="text" data-value-key="webgl.vendor" value="Google Inc. (Intel)" style="width:180px">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Renderer</span>
+      <input type="text" data-value-key="webgl.renderer" value="ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)" style="width:220px">
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="battery">
+    <div>
+      <div class="label"><span class="caret">▶</span> Battery API</div>
+      <div class="desc">Stub <code>navigator.getBattery</code> + <code>BatteryManager</code></div>
+    </div>
+    <div class="toggle" id="cat-battery" role="switch" aria-checked="true" tabindex="0" data-category="battery"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>charging</code></span>
+      <select data-value-key="battery.charging">
+        <option value="true" selected>true (plugged in)</option>
+        <option value="false">false (on battery)</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>level</code> (0–1)</span>
+      <input type="number" min="0" max="1" step="0.01" value="1" data-value-key="battery.level">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>chargingTime</code> (sec)</span>
+      <input type="text" value="0" data-value-key="battery.chargingTime" style="width:80px" placeholder="0 or Infinity">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>dischargingTime</code> (sec)</span>
+      <input type="text" value="Infinity" data-value-key="battery.dischargingTime" style="width:80px" placeholder="Infinity or seconds">
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="privacyHints">
+    <div>
+      <div class="label"><span class="caret">▶</span> Privacy hints</div>
+      <div class="desc"><code>globalPrivacyControl</code>, <code>doNotTrack</code>, <code>languages</code></div>
+    </div>
+    <div class="toggle" id="cat-privacyHints" role="switch" aria-checked="true" tabindex="0" data-category="privacyHints"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>globalPrivacyControl</code></span>
+      <select data-value-key="privacyHints.globalPrivacyControl">
+        <option value="false" selected>false</option>
+        <option value="true">true</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>doNotTrack</code></span>
+      <select data-value-key="privacyHints.doNotTrack">
+        <option value="null" selected>null</option>
+        <option value="0">"0"</option>
+        <option value="1">"1"</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>languages</code></span>
+      <input type="text" value="en-US, en" data-value-key="privacyHints.languages" style="width:140px">
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="network">
+    <div>
+      <div class="label"><span class="caret">▶</span> Network info</div>
+      <div class="desc"><code>connection.effectiveType</code>, <code>saveData</code>, <code>downlink</code>, <code>rtt</code></div>
+    </div>
+    <div class="toggle" id="cat-network" role="switch" aria-checked="true" tabindex="0" data-category="network"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>effectiveType</code></span>
+      <select data-value-key="network.effectiveType">
+        <option value="slow-2g">slow-2g</option>
+        <option value="2g">2g</option>
+        <option value="3g">3g</option>
+        <option value="4g" selected>4g</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>saveData</code></span>
+      <select data-value-key="network.saveData">
+        <option value="false" selected>false</option>
+        <option value="true">true</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>downlink</code> (Mbps)</span>
+      <input type="number" min="0" step="0.25" value="10" data-value-key="network.downlink">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>rtt</code> (ms)</span>
+      <input type="number" min="0" step="25" value="50" data-value-key="network.rtt">
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="hwInfo">
+    <div>
+      <div class="label"><span class="caret">▶</span> Hardware info</div>
+      <div class="desc"><code>deviceMemory</code>, <code>hardwareConcurrency</code>, touch, PDF</div>
+    </div>
+    <div class="toggle" id="cat-hwInfo" role="switch" aria-checked="true" tabindex="0" data-category="hwInfo"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>deviceMemory</code> (GB)</span>
+      <select data-value-key="hwInfo.deviceMemory">
+        <option value="0.25">0.25</option>
+        <option value="0.5">0.5</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="4">4</option>
+        <option value="8" selected>8</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>hardwareConcurrency</code></span>
+      <input type="number" min="1" max="64" step="1" value="8" data-value-key="hwInfo.hardwareConcurrency">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>maxTouchPoints</code></span>
+      <input type="number" min="0" max="20" step="1" value="0" data-value-key="hwInfo.maxTouchPoints">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>pdfViewerEnabled</code></span>
+      <select data-value-key="hwInfo.pdfViewerEnabled">
+        <option value="true" selected>true</option>
+        <option value="false">false</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="webgpu">
+    <div>
+      <div class="label"><span class="caret">▶</span> WebGPU</div>
+      <div class="desc">Stub <code>navigator.gpu</code> + <code>GPU</code>, <code>GPUAdapter</code>, <code>GPUDevice</code></div>
+    </div>
+    <div class="toggle" id="cat-webgpu" role="switch" aria-checked="true" tabindex="0" data-category="webgpu"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>getPreferredCanvasFormat()</code></span>
+      <select data-value-key="webgpu.canvasFormat">
+        <option value="bgra8unorm" selected>bgra8unorm (Win / Linux / Android)</option>
+        <option value="rgba8unorm">rgba8unorm (macOS / iOS)</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>requestAdapter()</code></span>
+      <select data-value-key="webgpu.exposeAdapter">
+        <option value="false" selected>null (no GPU)</option>
+        <option value="true">stub GPUAdapter</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Adapter vendor</span>
+      <select data-value-key="webgpu.adapterVendor">
+        <option value="intel" selected>intel</option>
+        <option value="nvidia">nvidia</option>
+        <option value="amd">amd</option>
+        <option value="apple">apple</option>
+        <option value="qualcomm">qualcomm</option>
+        <option value="google">google (swiftshader)</option>
+      </select>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Adapter architecture</span>
+      <input type="text" data-value-key="webgpu.adapterArchitecture" value="gen-12lp" style="width:120px">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>isFallbackAdapter</code></span>
+      <select data-value-key="webgpu.isFallbackAdapter">
+        <option value="false" selected>false</option>
+        <option value="true">true (swiftshader-like)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle">
+    <div>
+      <div class="label">Sensors</div>
+      <div class="desc"><code>Accelerometer</code>, <code>Gyroscope</code>, etc. (10 classes)</div>
+    </div>
+    <div class="toggle" id="cat-sensors" role="switch" aria-checked="true" tabindex="0" data-category="sensors"></div>
+  </div>
+
+  <div class="toggle-row sub-toggle">
+    <div>
+      <div class="label">Idle / Speech</div>
+      <div class="desc"><code>IdleDetector</code>, <code>SpeechRecognition</code></div>
+    </div>
+    <div class="toggle" id="cat-idleSpeech" role="switch" aria-checked="true" tabindex="0" data-category="idleSpeech"></div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="hardware">
+    <div>
+      <div class="label"><span class="caret">▶</span> Hardware APIs</div>
+      <div class="desc">WebUSB, Bluetooth, Serial, HID, MIDI</div>
+    </div>
+    <div class="toggle" id="cat-hardware" role="switch" aria-checked="true" tabindex="0" data-category="hardware"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label">WebUSB (<code>navigator.usb</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="hardware.usb"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Bluetooth (<code>navigator.bluetooth</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="hardware.bluetooth"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Serial (<code>navigator.serial</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="hardware.serial"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">HID (<code>navigator.hid</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="hardware.hid"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">MIDI (<code>requestMIDIAccess</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="hardware.midi"></div>
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="privacy">
+    <div>
+      <div class="label"><span class="caret">▶</span> Privacy Sandbox</div>
+      <div class="desc">Topics, FLEDGE, Shared Storage</div>
+    </div>
+    <div class="toggle" id="cat-privacy" role="switch" aria-checked="true" tabindex="0" data-category="privacy"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label">Topics (<code>document.browsingTopics</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="privacy.topics"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">FLEDGE / Protected Audience (8 methods)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="privacy.fledge"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Shared Storage (<code>window.sharedStorage</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="privacy.sharedStorage"></div>
+    </div>
+    <div class="sub-check-row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:4px">
+      <span class="sub-check-label" style="font-weight:600">Topic values</span>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Returned topic IDs</span>
+      <input type="text" data-value-key="topics.ids" placeholder="(empty)" style="width:140px">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>taxonomyVersion</code></span>
+      <input type="number" min="1" step="1" value="6" data-value-key="topics.taxonomyVersion">
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>modelVersion</code></span>
+      <input type="number" min="1" step="1" value="1" data-value-key="topics.modelVersion">
+    </div>
+    <div class="sub-check-row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:4px">
+      <span class="sub-check-label" style="font-weight:600">Shared Storage</span>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label"><code>remainingBudget()</code></span>
+      <input type="number" min="0" step="0.5" value="12" data-value-key="sharedStorage.budget">
+    </div>
+  </div>
+
+  <div class="toggle-row sub-toggle expand-row" data-expand="misc">
+    <div>
+      <div class="label"><span class="caret">▶</span> Misc</div>
+      <div class="desc"><code>queryLocalFonts</code>, <code>PressureObserver</code>, <code>OTPCredential</code>, related-apps</div>
+    </div>
+    <div class="toggle" id="cat-misc" role="switch" aria-checked="true" tabindex="0" data-category="misc"></div>
+  </div>
+  <div class="expand-content">
+    <div class="sub-check-row">
+      <span class="sub-check-label">Local Fonts (<code>queryLocalFonts</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="misc.queryLocalFonts"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Installed Related Apps</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="misc.getInstalledRelatedApps"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Compute Pressure (<code>PressureObserver</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="misc.pressureObserver"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">WebOTP (<code>OTPCredential</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="misc.otpCredential"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Storage Buckets (<code>navigator.storageBuckets</code>)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="misc.storageBuckets"></div>
+    </div>
+  </div>
+
+  <div class="info-section">
+    Each toggle is per-site. Off here ≠ off everywhere. Changes reload the tab so they take effect immediately.
+    <div style="margin-top:10px; display:flex; gap:8px">
+      <button id="reset-site" type="button">Reset this site</button>
+      <button id="manage-all" type="button">Manage all sites…</button>
+    </div>
+  </div>
+
+  <footer id="footer">Fingerprint Mitigator</footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

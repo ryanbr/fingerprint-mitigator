@@ -1,0 +1,247 @@
+// Background service worker — registers per-category content scripts
+// and the DNR Sec-CH-UA rule. Each category is independently
+// disable-able per-site via chrome.storage.local.siteOverrides:
+//
+//   siteOverrides: {
+//     "example.com": { battery: false, sensors: false }
+//     "bank.com":    { clientHints: false }
+//   }
+//   disabledDomains: { "fully-off.com": true }       — master per-site off
+//
+// All categories are on globally by default. A category is off for a
+// site if (a) the site is in disabledDomains, or (b) the site has a
+// false override for that category.
+
+const ALWAYS_EXCLUDE_HOSTS = ["challenges.cloudflare.com"];
+
+// Default Sec-CH-UA brand string. Version should track current
+// stable Chromium so the HTTP layer agrees with the JS-side
+// userAgentData.brands. Bump when the Chromium major rolls forward.
+const FAKE_SEC_CH_UA =
+  '"Google Chrome";v="148", "Chromium";v="148", "Not_A Brand";v="24"';
+
+// Category id → injected JS file. Each category is its own
+// chrome.scripting registration so per-site exclude_matches can
+// differ across categories.
+const CATEGORY_SCRIPTS = {
+  identity:    "src/inject-identity.js",
+  privacyHints: "src/inject-stub-privacy-hints.js",
+  canvas:      "src/inject-stub-canvas.js",
+  audio:       "src/inject-stub-audio.js",
+  webgl:       "src/inject-stub-webgl.js",
+  battery:     "src/inject-stub-battery.js",
+  network:     "src/inject-stub-network.js",
+  hwInfo:      "src/inject-stub-hwinfo.js",
+  webgpu:      "src/inject-stub-webgpu.js",
+  sensors:     "src/inject-stub-sensors.js",
+  idleSpeech:  "src/inject-stub-idle-speech.js",
+  hardware:    "src/inject-stub-hardware.js",
+  privacy:     "src/inject-stub-privacy.js",
+  misc:        "src/inject-stub-misc.js",
+};
+
+// Compute the list of hostnames for which a given category should be
+// skipped (whole-site off OR explicit category-off override).
+async function excludedHostsForCategory(category) {
+  const stored = await chrome.storage.local.get(["disabledDomains", "siteOverrides"]);
+  const disabled = stored.disabledDomains || {};
+  const overrides = stored.siteOverrides || {};
+  const out = new Set();
+  for (const d of Object.keys(disabled)) {
+    if (disabled[d]) out.add(d);
+  }
+  for (const d of Object.keys(overrides)) {
+    if (overrides[d] && overrides[d][category] === false) out.add(d);
+  }
+  return [...out];
+}
+
+function hostsToExcludeMatches(hosts) {
+  const out = ALWAYS_EXCLUDE_HOSTS.map(h => `*://${h}/*`);
+  for (const h of hosts) {
+    out.push(`*://${h}/*`);
+    out.push(`*://*.${h}/*`);
+  }
+  return out;
+}
+
+async function registerInjectScripts() {
+  const ids = ["fpmit-bridge", ...Object.keys(CATEGORY_SCRIPTS).map(c => `fpmit-${c}`)];
+  try { await chrome.scripting.unregisterContentScripts({ ids }); } catch { /* not yet registered */ }
+
+  const scripts = [];
+
+  // Bridge runs in ISOLATED world and dispatches per-site sub-check /
+  // value overrides to the MAIN-world category scripts. Excluded from
+  // master-disabled sites only (per-category disables don't need the
+  // bridge since the category script isn't registered).
+  const masterDisabled = await (async () => {
+    const stored = await chrome.storage.local.get(["disabledDomains"]);
+    const d = stored.disabledDomains || {};
+    return Object.keys(d).filter(k => d[k]);
+  })();
+  scripts.push({
+    id: "fpmit-bridge",
+    matches: ["<all_urls>"],
+    excludeMatches: hostsToExcludeMatches(masterDisabled),
+    js: ["src/bridge.js"],
+    runAt: "document_start",
+    world: "ISOLATED",
+    allFrames: true,
+    persistAcrossSessions: true,
+  });
+
+  for (const [category, file] of Object.entries(CATEGORY_SCRIPTS)) {
+    const hosts = await excludedHostsForCategory(category);
+    scripts.push({
+      id: `fpmit-${category}`,
+      matches: ["<all_urls>"],
+      excludeMatches: hostsToExcludeMatches(hosts),
+      js: [file],
+      runAt: "document_start",
+      world: "MAIN",
+      allFrames: true,
+      persistAcrossSessions: true,
+    });
+  }
+  await chrome.scripting.registerContentScripts(scripts);
+}
+
+// High-entropy Sec-CH-UA-* headers are always removed (leak version /
+// arch / brand-identity). The base values for Sec-CH-UA are user-
+// configurable via siteOverrides; same for Mobile and Platform.
+const HIGH_ENTROPY_REMOVES = [
+  { header: "Sec-CH-UA-Full-Version-List", operation: "remove" },
+  { header: "Sec-CH-UA-Full-Version", operation: "remove" },
+  { header: "Sec-CH-UA-Brand", operation: "remove" },
+  { header: "Sec-CH-UA-Arch", operation: "remove" },
+  { header: "Sec-CH-UA-Bitness", operation: "remove" },
+  { header: "Sec-CH-UA-Model", operation: "remove" },
+  { header: "Sec-CH-UA-Platform-Version", operation: "remove" },
+  { header: "Sec-CH-UA-WoW64", operation: "remove" },
+  { header: "Sec-CH-UA-Form-Factors", operation: "remove" },
+];
+
+const DNR_RESOURCE_TYPES = [
+  "main_frame", "sub_frame", "script", "stylesheet",
+  "xmlhttprequest", "image", "font", "media", "websocket",
+  "ping", "csp_report", "other",
+];
+
+function buildHeaderActions(brand, mobile, platform, mode) {
+  // mode === "remove" → strip Sec-CH-UA entirely (Firefox / Safari
+  // don't send any of these). Otherwise behave as the configurable
+  // Chrome-set mode: set the brand list + optional Mobile / Platform.
+  if (mode === "remove") {
+    return [
+      { header: "Sec-CH-UA", operation: "remove" },
+      { header: "Sec-CH-UA-Mobile", operation: "remove" },
+      { header: "Sec-CH-UA-Platform", operation: "remove" },
+      ...HIGH_ENTROPY_REMOVES,
+    ];
+  }
+  const out = [];
+  if (brand) out.push({ header: "Sec-CH-UA", operation: "set", value: brand });
+  if (mobile) out.push({ header: "Sec-CH-UA-Mobile", operation: "set", value: mobile });
+  if (platform) out.push({ header: "Sec-CH-UA-Platform", operation: "set", value: platform });
+  out.push(...HIGH_ENTROPY_REMOVES);
+  return out;
+}
+
+async function updateSecChUaRules() {
+  const stored = await chrome.storage.local.get(["disabledDomains", "siteOverrides"]);
+  const disabled = stored.disabledDomains || {};
+  const overrides = stored.siteOverrides || {};
+
+  // Sites where the clientHints category is fully off (master OR
+  // per-category override). These get NO rule at all.
+  const offSet = new Set();
+  for (const s of Object.keys(disabled)) if (disabled[s]) offSet.add(s);
+  for (const s of Object.keys(overrides)) {
+    if (overrides[s] && overrides[s].clientHints === false) offSet.add(s);
+  }
+
+  // Sites with per-site value overrides (any of brand / mobile /
+  // platform / mode). These get their own rule with priority 2.
+  const customSites = {};
+  for (const site of Object.keys(overrides)) {
+    if (offSet.has(site)) continue;
+    const v = overrides[site].values;
+    if (!v) continue;
+    const brand    = v["clientHints.brand"];
+    const mobile   = v["clientHints.mobile"];
+    const platform = v["clientHints.platform"];
+    const mode     = v["clientHints.mode"];
+    if (brand || mobile || platform || mode === "remove") {
+      customSites[site] = { brand, mobile, platform, mode };
+    }
+  }
+
+  // ── Base rule ─────────────────────────────────────────────────────
+  // Applies to everyone except (a) sites in offSet — fully excluded;
+  // (b) sites with per-site overrides — handled by their own rule.
+  const baseExcluded = [
+    ...ALWAYS_EXCLUDE_HOSTS,
+    ...offSet,
+    ...Object.keys(customSites),
+  ];
+  const baseCondition = { resourceTypes: DNR_RESOURCE_TYPES };
+  if (baseExcluded.length > 0) baseCondition.excludedRequestDomains = baseExcluded;
+  const addRules = [
+    {
+      id: 101,
+      priority: 1,
+      action: {
+        type: "modifyHeaders",
+        requestHeaders: buildHeaderActions(FAKE_SEC_CH_UA, null, null),
+      },
+      condition: baseCondition,
+    },
+  ];
+
+  // ── Per-site override rules (200+) ────────────────────────────────
+  let ruleId = 200;
+  for (const [site, v] of Object.entries(customSites)) {
+    addRules.push({
+      id: ruleId++,
+      priority: 2,
+      action: {
+        type: "modifyHeaders",
+        requestHeaders: buildHeaderActions(
+          v.brand || FAKE_SEC_CH_UA,
+          v.mobile || null,
+          v.platform || null,
+          v.mode || null,
+        ),
+      },
+      condition: {
+        resourceTypes: DNR_RESOURCE_TYPES,
+        requestDomains: [site],
+      },
+    });
+  }
+
+  // Clear all prior dynamic rules and reinstall.
+  try {
+    const existing = await chrome.declarativeNetRequest.getDynamicRules();
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: existing.map(r => r.id),
+      addRules,
+    });
+  } catch (e) {
+    console.error("[fp-mitigator] DNR update failed:", e);
+  }
+}
+
+function refreshAll() {
+  registerInjectScripts().catch(() => {});
+  updateSecChUaRules().catch(() => {});
+}
+
+chrome.runtime.onInstalled.addListener(refreshAll);
+chrome.runtime.onStartup.addListener(refreshAll);
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes.disabledDomains || changes.siteOverrides) refreshAll();
+});

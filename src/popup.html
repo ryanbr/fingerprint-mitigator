@@ -121,6 +121,49 @@
     .toggle.on { background: var(--accent); }
     .toggle.on::after { transform: translateX(18px); }
 
+    /* Master button — replaces the master toggle switch with a
+       prominent, clearly-labeled action. Color flips between green
+       (extension active) and red (extension off for this site). */
+    .master-btn-wrap {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .master-btn {
+      display: block;
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: rgba(67, 160, 71, 0.12);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      font-family: inherit;
+      transition: background 0.1s ease;
+    }
+    body.light .master-btn { background: rgba(46, 125, 50, 0.10); }
+    .master-btn:hover { background: rgba(67, 160, 71, 0.22); }
+    body.light .master-btn:hover { background: rgba(46, 125, 50, 0.18); }
+    .master-btn.is-off {
+      border-color: var(--high);
+      background: rgba(239, 83, 80, 0.14);
+    }
+    body.light .master-btn.is-off { background: rgba(211, 47, 47, 0.10); }
+    .master-btn.is-off:hover { background: rgba(239, 83, 80, 0.24); }
+    body.light .master-btn.is-off:hover { background: rgba(211, 47, 47, 0.18); }
+    .master-btn-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .master-btn-desc {
+      display: block;
+      font-size: 12px;
+      color: var(--text-faint);
+      font-weight: 400;
+      margin-top: 3px;
+    }
+
     .sub-toggle { padding-left: 26px; }
     .sub-toggle .label { font-size: 14px; font-weight: 500; }
     .sub-toggle .desc { font-size: 12px; }
@@ -286,12 +329,11 @@
     </div>
   </div>
 
-  <div class="toggle-row">
-    <div>
-      <div class="label">Mask on this site</div>
-      <div class="desc">Master switch. Turning off disables everything for this site.</div>
-    </div>
-    <div class="toggle" id="site-toggle" role="switch" aria-checked="true" tabindex="0"></div>
+  <div class="master-btn-wrap">
+    <button id="site-toggle" type="button" class="master-btn" aria-pressed="false">
+      <span class="master-btn-label" id="master-btn-label">Disable on this site</span>
+      <span class="master-btn-desc" id="master-btn-desc">Masking is currently active. Click to turn off for this site.</span>
+    </button>
   </div>
 
   <div class="toggle-row sub-toggle expand-row" data-expand="identity">

@@ -141,7 +141,8 @@ function isCategoryModified(category) {
 // Cache every selector applyToggleStates needs at module load. The
 // function runs ~5× during init (theme/storage/tab-query callbacks plus
 // every per-site change), so re-querying the DOM each time is wasteful.
-const $masterRow = $masterToggle.closest(".toggle-row");
+const $masterLabel = document.getElementById("master-btn-label");
+const $masterDesc    = document.getElementById("master-btn-desc");
 const $catToggles = {};   // category → toggle element
 const $catRows    = {};   // category → row element
 for (const cat of CATEGORIES) {
@@ -157,17 +158,17 @@ const $resetBtn    = document.getElementById("reset-site");
 
 function applyToggleStates() {
   const masked = isMasked();
-  $masterToggle.classList.toggle("on", masked);
-  $masterToggle.setAttribute("aria-checked", String(masked));
+  // Button toggles between green "Disable on this site" (currently
+  // active) and red "Enable on this site" (currently off).
+  $masterToggle.classList.toggle("is-off", !masked);
+  $masterToggle.setAttribute("aria-pressed", String(!masked));
+  if ($masterLabel) $masterLabel.textContent = masked
+    ? "Disable on this site"
+    : "Enable on this site";
+  if ($masterDesc) $masterDesc.textContent = masked
+    ? "Masking is currently active. Click to turn off for this site."
+    : "Masking is currently off on this site. Click to re-enable.";
   document.body.classList.toggle("master-off", !masked);
-
-  // Master row tinted if anything (master OR any per-cat override) is set.
-  const key = normalizeDomain(currentDomain);
-  const matchKey = key ? findParentKey(siteOverrides, key) : null;
-  if ($masterRow) {
-    const masterModified = !!findParentKey(disabledDomains, key) || !!matchKey;
-    $masterRow.classList.toggle("modified", masterModified);
-  }
 
   for (const cat of CATEGORIES) {
     const el = $catToggles[cat];

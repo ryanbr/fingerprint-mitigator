@@ -138,6 +138,23 @@ function isCategoryModified(category) {
   return false;
 }
 
+// Cache every selector applyToggleStates needs at module load. The
+// function runs ~5× during init (theme/storage/tab-query callbacks plus
+// every per-site change), so re-querying the DOM each time is wasteful.
+const $masterRow = $masterToggle.closest(".toggle-row");
+const $catToggles = {};   // category → toggle element
+const $catRows    = {};   // category → row element
+for (const cat of CATEGORIES) {
+  const el = document.getElementById("cat-" + cat);
+  if (el) {
+    $catToggles[cat] = el;
+    $catRows[cat]    = el.closest(".toggle-row");
+  }
+}
+const $subCheckEls = Array.from(document.querySelectorAll("[data-subcheck-key]"));
+const $valueEls    = Array.from(document.querySelectorAll("[data-value-key]"));
+const $resetBtn    = document.getElementById("reset-site");
+
 function applyToggleStates() {
   const masked = isMasked();
   $masterToggle.classList.toggle("on", masked);
@@ -147,44 +164,42 @@ function applyToggleStates() {
   // Master row tinted if anything (master OR any per-cat override) is set.
   const key = normalizeDomain(currentDomain);
   const matchKey = key ? findParentKey(siteOverrides, key) : null;
-  const masterRow = $masterToggle.closest(".toggle-row");
-  if (masterRow) {
+  if ($masterRow) {
     const masterModified = !!findParentKey(disabledDomains, key) || !!matchKey;
-    masterRow.classList.toggle("modified", masterModified);
+    $masterRow.classList.toggle("modified", masterModified);
   }
 
   for (const cat of CATEGORIES) {
-    const el = document.getElementById("cat-" + cat);
+    const el = $catToggles[cat];
     if (!el) continue;
     const on = getCategoryEnabled(cat);
     el.classList.toggle("on", on);
     el.setAttribute("aria-checked", String(on));
-    const row = el.closest(".toggle-row");
+    const row = $catRows[cat];
     if (row) row.classList.toggle("modified", isCategoryModified(cat));
   }
 
   // Sub-check toggles
-  document.querySelectorAll("[data-subcheck-key]").forEach(el => {
+  for (const el of $subCheckEls) {
     const on = getSubCheckEnabled(el.dataset.subcheckKey);
     el.classList.toggle("on", on);
     el.setAttribute("aria-checked", String(on));
-  });
+  }
 
   // Value inputs
-  document.querySelectorAll("[data-value-key]").forEach(el => {
+  for (const el of $valueEls) {
     const key = el.dataset.valueKey;
     const def = el.dataset.defaultValue !== undefined
       ? el.dataset.defaultValue
       : (el.tagName === "SELECT" ? el.querySelector("option[selected]")?.value : el.defaultValue);
     el.value = String(getValueOverride(key, def));
-  });
+  }
 
   // Reset button — disabled when nothing to reset
-  const resetBtn = document.getElementById("reset-site");
-  if (resetBtn) {
+  if ($resetBtn) {
     const k = normalizeDomain(currentDomain);
     const hasAny = !!k && (!!disabledDomains[k] || !!siteOverrides[k]);
-    resetBtn.disabled = !hasAny;
+    $resetBtn.disabled = !hasAny;
   }
 }
 

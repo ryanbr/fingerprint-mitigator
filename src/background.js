@@ -41,9 +41,10 @@ const CATEGORY_SCRIPTS = {
 };
 
 // Compute the list of hostnames for which a given category should be
-// skipped (whole-site off OR explicit category-off override).
-async function excludedHostsForCategory(category) {
-  const stored = await chrome.storage.local.get(["disabledDomains", "siteOverrides"]);
+// skipped (whole-site off OR explicit category-off override). Takes
+// pre-read storage so a refresh can fetch storage once and reuse for
+// every category + the DNR rules.
+function excludedHostsForCategory(category, stored) {
   const disabled = stored.disabledDomains || {};
   const overrides = stored.siteOverrides || {};
   const out = new Set();
@@ -65,7 +66,7 @@ function hostsToExcludeMatches(hosts) {
   return out;
 }
 
-async function registerInjectScripts() {
+async function registerInjectScripts(stored) {
   const ids = ["fpmit-bridge", ...Object.keys(CATEGORY_SCRIPTS).map(c => `fpmit-${c}`)];
   try { await chrome.scripting.unregisterContentScripts({ ids }); } catch { /* not yet registered */ }
 
@@ -75,11 +76,8 @@ async function registerInjectScripts() {
   // value overrides to the MAIN-world category scripts. Excluded from
   // master-disabled sites only (per-category disables don't need the
   // bridge since the category script isn't registered).
-  const masterDisabled = await (async () => {
-    const stored = await chrome.storage.local.get(["disabledDomains"]);
-    const d = stored.disabledDomains || {};
-    return Object.keys(d).filter(k => d[k]);
-  })();
+  const disabled = stored.disabledDomains || {};
+  const masterDisabled = Object.keys(disabled).filter(k => disabled[k]);
   scripts.push({
     id: "fpmit-bridge",
     matches: ["<all_urls>"],
@@ -92,7 +90,7 @@ async function registerInjectScripts() {
   });
 
   for (const [category, file] of Object.entries(CATEGORY_SCRIPTS)) {
-    const hosts = await excludedHostsForCategory(category);
+    const hosts = excludedHostsForCategory(category, stored);
     scripts.push({
       id: `fpmit-${category}`,
       matches: ["<all_urls>"],
@@ -148,8 +146,7 @@ function buildHeaderActions(brand, mobile, platform, mode) {
   return out;
 }
 
-async function updateSecChUaRules() {
-  const stored = await chrome.storage.local.get(["disabledDomains", "siteOverrides"]);
+async function updateSecChUaRules(stored) {
   const disabled = stored.disabledDomains || {};
   const overrides = stored.siteOverrides || {};
 
@@ -233,9 +230,11 @@ async function updateSecChUaRules() {
   }
 }
 
-function refreshAll() {
-  registerInjectScripts().catch(() => {});
-  updateSecChUaRules().catch(() => {});
+async function refreshAll() {
+  // Single storage read shared across both refreshers.
+  const stored = await chrome.storage.local.get(["disabledDomains", "siteOverrides"]);
+  registerInjectScripts(stored).catch(() => {});
+  updateSecChUaRules(stored).catch(() => {});
 }
 
 chrome.runtime.onInstalled.addListener(refreshAll);

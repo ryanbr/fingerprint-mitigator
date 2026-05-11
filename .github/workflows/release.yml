@@ -1,0 +1,191 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: minor
+      version_override:
+        description: "Or set an exact version (overrides bump type)"
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Calculate version
+        id: version
+        run: |
+          CURRENT=$(jq -r '.version' manifest.json)
+          OVERRIDE="${{ github.event.inputs.version_override }}"
+
+          if [ -n "$OVERRIDE" ]; then
+            VERSION="$OVERRIDE"
+            echo "Using override version: $VERSION"
+          else
+            BUMP="${{ github.event.inputs.bump }}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+            case "$BUMP" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+            esac
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            echo "Bumping $CURRENT → $VERSION ($BUMP)"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag doesn't already exist
+        run: |
+          TAG=${{ steps.version.outputs.tag }}
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Error: Tag $TAG already exists"
+            exit 1
+          fi
+
+      - name: Update manifest version
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          jq --arg v "$VERSION" '.version = $v' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
+          echo "Updated manifest.json to $VERSION"
+
+      - name: Commit version bump
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "Release v${VERSION}"
+          git push
+
+      - name: Get commit log since last tag
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            echo "Previous tag: $PREV_TAG"
+            git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" -- . ':!.github' > /tmp/changelog.txt
+          else
+            echo "No previous tag, using full log"
+            git log --pretty=format:"- %s (%h)" -- . ':!.github' > /tmp/changelog.txt
+          fi
+          echo "Changelog:"
+          cat /tmp/changelog.txt
+
+      - name: Create git tag
+        run: |
+          TAG=${{ steps.version.outputs.tag }}
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Install and lint
+        run: |
+          npm ci
+          npm run lint
+
+      - name: Generate signing key
+        run: openssl genrsa -out key.pem 2048
+
+      - name: Build CRX, ZIP, and XPI
+        run: |
+          npm install -g crx3
+          VERSION=${{ steps.version.outputs.version }}
+
+          mkdir -p dist ext ext-firefox
+
+          # Chrome build — plain JS, no bundler. Copy manifest, LICENSE,
+          # icons (PNGs only — icon.svg is the source, not packaged),
+          # and every src/*.js / *.html the manifest references.
+          cp manifest.json ext/
+          cp LICENSE ext/
+          mkdir -p ext/icons
+          cp icons/icon*.png ext/icons/
+          mkdir -p ext/src
+          cp src/bridge.js \
+             src/background.js \
+             src/popup.html src/popup.js \
+             src/changes.html src/changes.js \
+             src/inject-identity.js \
+             ext/src/
+          cp src/inject-stub-*.js ext/src/
+
+          # CRX (Chrome auto-install)
+          crx3 ext \
+            --keyPath key.pem \
+            --crxPath dist/fingerprint-mitigator-${VERSION}.crx
+
+          # ZIP (Chrome Web Store / load-unpacked)
+          cd ext
+          zip -r ../dist/fingerprint-mitigator-${VERSION}.zip . \
+            -x "*.DS_Store"
+          cd ..
+
+          # Firefox build — patch manifest:
+          #   1. Add browser_specific_settings.gecko (ID + min version + AMO data-collection)
+          #   2. Pair service_worker with scripts (AMO validator requires both)
+          # Chrome would reject background.scripts but never sees this file.
+          cp -r ext/* ext-firefox/
+          jq '
+            . + {
+              "browser_specific_settings": {
+                "gecko": {
+                  "id": "fingerprint-mitigator@ryanbr",
+                  "strict_min_version": "128.0",
+                  "data_collection_permissions": {
+                    "required": ["none"]
+                  }
+                }
+              }
+            }
+            | .background = {
+                "service_worker": "src/background.js",
+                "scripts": ["src/background.js"]
+              }
+          ' ext/manifest.json > ext-firefox/manifest.json
+
+          cd ext-firefox
+          zip -r ../dist/fingerprint-mitigator-${VERSION}.xpi . \
+            -x "*.DS_Store"
+          cd ..
+
+      - name: Create release with changelog
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          TAG=${{ steps.version.outputs.tag }}
+          CHANGELOG=$(cat /tmp/changelog.txt)
+
+          gh release create "$TAG" \
+            --title "Fingerprint Mitigator $TAG" \
+            --notes "## Changes since last release
+
+          ${CHANGELOG}
+
+          ## Install
+
+          **Chrome / Chromium / Brave / Edge / Vivaldi / Opera:**
+          - **fingerprint-mitigator-${VERSION}.crx** — drag into \`chrome://extensions\` (Developer mode required)
+          - **fingerprint-mitigator-${VERSION}.zip** — unzip and load unpacked via Developer mode
+
+          **Firefox:**
+          - **fingerprint-mitigator-${VERSION}.xpi** — open in Firefox or install via \`about:addons\` (requires Firefox 128+)" \
+            dist/fingerprint-mitigator-${VERSION}.crx \
+            dist/fingerprint-mitigator-${VERSION}.zip \
+            dist/fingerprint-mitigator-${VERSION}.xpi

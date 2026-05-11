@@ -121,6 +121,60 @@
     .toggle.on { background: var(--accent); }
     .toggle.on::after { transform: translateX(18px); }
 
+    /* Tabs (Settings / Log) */
+    .tabs {
+      display: flex;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    .tab {
+      flex: 1;
+      padding: 8px 0;
+      text-align: center;
+      cursor: pointer;
+      color: var(--text-faint);
+      font-size: 13px;
+      font-weight: 600;
+      border-bottom: 2px solid transparent;
+      user-select: none;
+      transition: color 0.1s, border-color 0.1s;
+    }
+    .tab:hover { color: var(--text-dim); }
+    .tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Log panel — sized to content. The Chrome popup window owns the
+       vertical scroll when the total content exceeds its ~600px cap.
+       Setting our own max-height + overflow here would create a second
+       inner scrollbar (visible as a double scrollbar). */
+    .log-pre {
+      font-family: Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 10px;
+      line-height: 1.5;
+      padding: 10px 12px;
+      background: var(--bg);
+      color: var(--text);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: normal;
+      margin: 0;
+    }
+    .log-pre .group {
+      color: var(--accent);
+      font-weight: 700;
+      display: block;
+      margin: 8px 0 2px;
+    }
+    .log-pre .group:first-child { margin-top: 0; }
+    .log-pre .on  { color: var(--accent); }
+    .log-pre .off { color: var(--high); }
+    .log-pre .override { color: #fb8c00; font-weight: 700; }   /* orange */
+    .log-pre .src { color: var(--text-faint); }
+
     /* Master button — replaces the master toggle switch with a
        prominent, clearly-labeled action. Color flips between green
        (extension active) and red (extension off for this site). */
@@ -302,6 +356,13 @@
     <div class="site">Current site</div>
     <div class="url" id="site-url">(loading…)</div>
   </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="settings">Settings</div>
+    <div class="tab" data-tab="log">Log</div>
+  </div>
+
+  <div class="tab-panel active" id="tab-settings">
 
   <div class="toggle-row">
     <div style="flex:1">
@@ -786,6 +847,12 @@
       <span class="sub-check-label">Storage Buckets (<code>navigator.storageBuckets</code>)</span>
       <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="misc.storageBuckets"></div>
     </div>
+  </div>
+
+  </div><!-- /tab-settings -->
+
+  <div class="tab-panel" id="tab-log">
+    <pre class="log-pre" id="log-output"></pre>
   </div>
 
   <div class="info-section">

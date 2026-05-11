@@ -202,6 +202,11 @@ function applyToggleStates() {
     const hasAny = !!k && (!!disabledDomains[k] || !!siteOverrides[k]);
     $resetBtn.disabled = !hasAny;
   }
+
+  // Re-render the log only if it's the visible tab. Otherwise the
+  // tab-switch handler will render it on demand.
+  const logActive = document.getElementById("tab-log")?.classList.contains("active");
+  if (logActive) renderLog();
 }
 
 function setMasterToggle(masked) {
@@ -363,6 +368,134 @@ chrome.storage.local.get(["disabledDomains", "siteOverrides"], (s) => {
   disabledDomains = s.disabledDomains || {};
   siteOverrides = s.siteOverrides || {};
   applyToggleStates();
+});
+
+// ── Tabs + Log panel ──────────────────────────────────────────────────
+// "Settings" tab (the main config UI) and "Log" tab (a console-style
+// dump of every setting's current value + source). The log refreshes
+// automatically when state changes or the user switches to the tab.
+const $logOutput = document.getElementById("log-output");
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function fmtValue(v) {
+  if (typeof v === "string") return JSON.stringify(v);
+  if (v === null) return "null";
+  return String(v);
+}
+
+function pad(str, n) {
+  str = String(str);
+  return str.length >= n ? str : str + " ".repeat(n - str.length);
+}
+
+// Generate the log content from the current popup state. Reads from
+// the same closure data the rest of the popup uses (siteOverrides,
+// disabledDomains, currentDomain) plus the DOM-attribute caches
+// ($subCheckEls, $valueEls).
+function renderLog() {
+  if (!$logOutput) return;
+  const key = normalizeDomain(currentDomain);
+  const lines = [];
+
+  lines.push(`Current site: ${escHtml(currentDomain || "(none)")}`);
+  const inheritedFrom = key ? findParentKey(siteOverrides, key) : null;
+  if (inheritedFrom && inheritedFrom !== key) {
+    lines.push(`<span class="src">Inheriting overrides from: ${escHtml(inheritedFrom)}</span>`);
+  }
+  lines.push("");
+
+  // ── Master ──
+  lines.push(`<span class="group">master</span>`);
+  const masterOn = isMasked();
+  const masterParent = key ? findParentKey(disabledDomains, key) : null;
+  const masterSrc = masterParent ? (masterParent === key ? "this site" : "inherited:" + masterParent) : "default";
+  lines.push(
+    `  ${pad("mask", 24)} ` +
+    `<span class="${masterOn ? "on" : "off"}">${masterOn ? "ON " : "OFF"}</span> ` +
+    `<span class="src">[${escHtml(masterSrc)}]</span>`
+  );
+  lines.push("");
+
+  // ── Per-category breakdown ──
+  for (const cat of CATEGORIES) {
+    const prefixes = CATEGORY_PREFIXES[cat] || [];
+    const subKeys = $subCheckEls
+      .map(el => el.dataset.subcheckKey)
+      .filter(k => prefixes.some(p => k.startsWith(p)));
+    const valEls = $valueEls.filter(el => prefixes.some(p => el.dataset.valueKey.startsWith(p)));
+
+    lines.push(`<span class="group">${escHtml(cat)}</span>`);
+
+    // Category enable/disable
+    const catOn = getCategoryEnabled(cat);
+    const matchKey = key ? findParentKey(siteOverrides, key) : null;
+    const catOverridden = !!matchKey && siteOverrides[matchKey][cat] === false;
+    const catSrc = catOverridden
+      ? (matchKey === key ? "this site" : "inherited:" + matchKey)
+      : "default";
+    lines.push(
+      `  ${pad(cat, 24)} ` +
+      `<span class="${catOn ? "on" : "off"}">${catOn ? "ON " : "OFF"}</span> ` +
+      `<span class="src">[${escHtml(catSrc)}]</span>`
+    );
+
+    // Sub-checks
+    for (const sk of subKeys) {
+      const on = getSubCheckEnabled(sk);
+      const ov = matchKey ? siteOverrides[matchKey].subChecks : null;
+      const isOverride = ov && ov[sk] === false;
+      const src = isOverride
+        ? (matchKey === key ? "this site" : "inherited:" + matchKey)
+        : "default";
+      lines.push(
+        `    ${pad(sk, 22)} ` +
+        `<span class="${on ? "on" : "off"}">${on ? "ON " : "OFF"}</span> ` +
+        `<span class="src">[${escHtml(src)}]</span>`
+      );
+    }
+
+    // Values
+    for (const el of valEls) {
+      const vk = el.dataset.valueKey;
+      const def = el.dataset.defaultValue !== undefined
+        ? el.dataset.defaultValue
+        : (el.tagName === "SELECT" ? el.querySelector("option[selected]")?.value : el.defaultValue);
+      const cur = getValueOverride(vk, def);
+      const isOverride = String(cur) !== String(def);
+      const ovValues = matchKey ? siteOverrides[matchKey].values : null;
+      const explicitOverride = ovValues && ovValues[vk] !== undefined;
+      const src = explicitOverride
+        ? (matchKey === key ? "this site" : "inherited:" + matchKey)
+        : "default";
+      lines.push(
+        `    ${pad(vk, 22)} = ` +
+        `<span class="${isOverride ? "override" : ""}">${escHtml(fmtValue(cur))}</span> ` +
+        `<span class="src">[${escHtml(src)}]</span>`
+      );
+    }
+
+    lines.push("");
+  }
+
+  $logOutput.innerHTML = lines.join("\n");
+}
+
+document.querySelectorAll(".tab").forEach(el => {
+  el.addEventListener("click", () => {
+    const target = el.dataset.tab;
+    document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t === el));
+    document.querySelectorAll(".tab-panel").forEach(p => {
+      p.classList.toggle("active", p.id === "tab-" + target);
+    });
+    if (target === "log") renderLog();
+  });
 });
 
 // ── Browser presets ───────────────────────────────────────────────────

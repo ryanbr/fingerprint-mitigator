@@ -3,7 +3,9 @@
 // Mode-based wrapping of canvas readback methods. Default mode "off"
 // so the script is harmless until the user opts in per-site.
 //
-//   off        passthrough; canvas works normally (default)
+//   off        passthrough; canvas works normally (default).
+//              Our wrappers are NOT installed on the prototype, so
+//              our line never appears in any stack trace.
 //   stabilize  per-canvas-instance WeakMap cache — first read on a
 //              canvas is computed, subsequent reads on the same canvas
 //              return the cached result. Defeats "read twice, compare
@@ -14,7 +16,7 @@
 //              getImageData → SecurityError. Bulletproof but breaks
 //              anything legitimately using canvas readback.
 //
-// Wraps these methods:
+// Wraps these methods (when mode is non-off):
 //   HTMLCanvasElement.prototype.toDataURL
 //   HTMLCanvasElement.prototype.toBlob
 //   CanvasRenderingContext2D.prototype.getImageData
@@ -58,30 +60,39 @@
     return new Blob([buf], { type: "image/png" });
   }
 
-  // ── toDataURL ────────────────────────────────────────────────────────
-  if (typeof HTMLCanvasElement !== "undefined") {
-    const orig = HTMLCanvasElement.prototype.toDataURL;
-    const wrap = function () {
-      if (mode === "off") return orig.apply(this, arguments);
+  // ── Originals captured once at document_start ───────────────────────
+  // Stored so we can lazily install / uninstall the wrappers when the
+  // user toggles canvas mode without leaving stale references behind.
+  const origToDataURL = typeof HTMLCanvasElement !== "undefined"
+    ? HTMLCanvasElement.prototype.toDataURL : null;
+  const origToBlob = typeof HTMLCanvasElement !== "undefined" && typeof HTMLCanvasElement.prototype.toBlob === "function"
+    ? HTMLCanvasElement.prototype.toBlob : null;
+  const origGetImageData = typeof CanvasRenderingContext2D !== "undefined"
+    ? CanvasRenderingContext2D.prototype.getImageData : null;
+  const origConvertToBlob = typeof OffscreenCanvas !== "undefined" && typeof OffscreenCanvas.prototype.convertToBlob === "function"
+    ? OffscreenCanvas.prototype.convertToBlob : null;
+
+  // ── Wrappers (constructed once, installed on demand) ────────────────
+  // These all read `mode` live from the closure so the same wrapper
+  // serves both "stabilize" and "block" modes.
+  let wrapToDataURL, wrapToBlob, wrapGetImageData, wrapConvertToBlob;
+
+  if (origToDataURL) {
+    wrapToDataURL = function () {
       if (mode === "block") return BLANK_PNG_DATAURL;
       // stabilize
       if (dataUrlCache.has(this)) return dataUrlCache.get(this);
-      const r = orig.apply(this, arguments);
+      const r = origToDataURL.apply(this, arguments);
       dataUrlCache.set(this, r);
       return r;
     };
-    fnWrapperMap.set(wrap, orig);
-    copyFnIdentity(wrap, orig);
-    HTMLCanvasElement.prototype.toDataURL = wrap;
+    fnWrapperMap.set(wrapToDataURL, origToDataURL);
+    copyFnIdentity(wrapToDataURL, origToDataURL);
   }
 
-  // ── toBlob ───────────────────────────────────────────────────────────
-  if (typeof HTMLCanvasElement !== "undefined" && typeof HTMLCanvasElement.prototype.toBlob === "function") {
-    const orig = HTMLCanvasElement.prototype.toBlob;
-    const wrap = function (callback) {
-      if (mode === "off") return orig.apply(this, arguments);
+  if (origToBlob) {
+    wrapToBlob = function (callback) {
       if (typeof callback !== "function") {
-        // Match Chrome: TypeError on missing callback
         throw new TypeError("Failed to execute 'toBlob' on 'HTMLCanvasElement': 1 argument required");
       }
       if (mode === "block") {
@@ -102,18 +113,14 @@
       };
       const args = [intercept];
       for (let i = 1; i < arguments.length; i++) args.push(arguments[i]);
-      return orig.apply(this, args);
+      return origToBlob.apply(this, args);
     };
-    fnWrapperMap.set(wrap, orig);
-    copyFnIdentity(wrap, orig);
-    HTMLCanvasElement.prototype.toBlob = wrap;
+    fnWrapperMap.set(wrapToBlob, origToBlob);
+    copyFnIdentity(wrapToBlob, origToBlob);
   }
 
-  // ── getImageData (2D) ────────────────────────────────────────────────
-  if (typeof CanvasRenderingContext2D !== "undefined") {
-    const orig = CanvasRenderingContext2D.prototype.getImageData;
-    const wrap = function () {
-      if (mode === "off") return orig.apply(this, arguments);
+  if (origGetImageData) {
+    wrapGetImageData = function () {
       if (mode === "block") {
         throw new DOMException(
           "The canvas has been tainted by cross-origin data.",
@@ -121,32 +128,50 @@
         );
       }
       if (imageDataCache.has(this)) return imageDataCache.get(this);
-      const r = orig.apply(this, arguments);
+      const r = origGetImageData.apply(this, arguments);
       imageDataCache.set(this, r);
       return r;
     };
-    fnWrapperMap.set(wrap, orig);
-    copyFnIdentity(wrap, orig);
-    CanvasRenderingContext2D.prototype.getImageData = wrap;
+    fnWrapperMap.set(wrapGetImageData, origGetImageData);
+    copyFnIdentity(wrapGetImageData, origGetImageData);
   }
 
-  // ── OffscreenCanvas.convertToBlob ───────────────────────────────────
-  if (typeof OffscreenCanvas !== "undefined" && typeof OffscreenCanvas.prototype.convertToBlob === "function") {
-    const orig = OffscreenCanvas.prototype.convertToBlob;
-    const wrap = function () {
-      if (mode === "off") return orig.apply(this, arguments);
+  if (origConvertToBlob) {
+    wrapConvertToBlob = function () {
       if (mode === "block") return Promise.resolve(makeBlankBlob());
       const cached = blobCache.get(this);
       if (cached) return Promise.resolve(cached);
       const self = this;
-      return orig.apply(this, arguments).then(blob => {
+      return origConvertToBlob.apply(this, arguments).then(blob => {
         if (blob) blobCache.set(self, blob);
         return blob;
       });
     };
-    fnWrapperMap.set(wrap, orig);
-    copyFnIdentity(wrap, orig);
-    OffscreenCanvas.prototype.convertToBlob = wrap;
+    fnWrapperMap.set(wrapConvertToBlob, origConvertToBlob);
+    copyFnIdentity(wrapConvertToBlob, origConvertToBlob);
+  }
+
+  // ── Lazy install / uninstall ────────────────────────────────────────
+  // Defaults to NOT installed. Switching to stabilize/block installs;
+  // switching back to off uninstalls (prototype reverts to native).
+  // Net effect: when mode is "off", our wrappers are never on the
+  // prototype chain — our line cannot appear in any stack trace.
+  let installed = false;
+  function install() {
+    if (installed) return;
+    if (wrapToDataURL)      HTMLCanvasElement.prototype.toDataURL = wrapToDataURL;
+    if (wrapToBlob)         HTMLCanvasElement.prototype.toBlob = wrapToBlob;
+    if (wrapGetImageData)   CanvasRenderingContext2D.prototype.getImageData = wrapGetImageData;
+    if (wrapConvertToBlob)  OffscreenCanvas.prototype.convertToBlob = wrapConvertToBlob;
+    installed = true;
+  }
+  function uninstall() {
+    if (!installed) return;
+    if (origToDataURL)      HTMLCanvasElement.prototype.toDataURL = origToDataURL;
+    if (origToBlob)         HTMLCanvasElement.prototype.toBlob = origToBlob;
+    if (origGetImageData)   CanvasRenderingContext2D.prototype.getImageData = origGetImageData;
+    if (origConvertToBlob)  OffscreenCanvas.prototype.convertToBlob = origConvertToBlob;
+    installed = false;
   }
 
   // ── Per-site mode override ──────────────────────────────────────────
@@ -156,5 +181,7 @@
       const v = values && values["canvas.mode"];
       if (v === "off" || v === "stabilize" || v === "block") mode = v;
     } catch { /* malformed */ }
+    if (mode === "off") uninstall();
+    else install();
   }, { once: true });
 })();

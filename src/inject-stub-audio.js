@@ -1,14 +1,17 @@
 // Audio fingerprinting mitigation — MAIN world, document_start.
 //
-// Mode-based wrapping of audio-readback methods (parallel to canvas):
-//   off        passthrough (default — no breakage)
+// Same model as canvas: mode-based wrapping with lazy install. Default
+// mode "off" means wrappers are NOT installed on the prototype, so our
+// line never appears in any stack trace.
+//
+//   off        passthrough (default — no wrappers installed)
 //   stabilize  per-instance WeakMap cache; subsequent reads on the
 //              same AudioBuffer / AnalyserNode / OfflineAudioContext
 //              return the cached result. Defeats "render twice,
 //              compare bytes, flag as Brave" detection.
 //   block      return zero-filled / silent data.
 //
-// Wraps:
+// Wraps (when mode is non-off):
 //   AudioBuffer.prototype.getChannelData
 //   AudioBuffer.prototype.copyFromChannel
 //   AnalyserNode.prototype.getFloatFrequencyData
@@ -40,111 +43,124 @@
   }
 
   let mode = "off";
-  // Per-AudioBuffer: array of cached Float32Arrays keyed by channel index
   const channelCache = new WeakMap();
-  // Per-AnalyserNode: cached typed-array data for each of the 4 readers
   const analyserCache = new WeakMap();
-  // Per-OfflineAudioContext: cached AudioBuffer
   const renderCache = new WeakMap();
 
-  // ── AudioBuffer.getChannelData ──────────────────────────────────────
-  if (typeof AudioBuffer !== "undefined") {
-    const orig = AudioBuffer.prototype.getChannelData;
-    const wrap = function (channel) {
-      if (mode === "off") return orig.call(this, channel);
+  // ── Originals captured once ─────────────────────────────────────────
+  const origGetChannelData = typeof AudioBuffer !== "undefined"
+    ? AudioBuffer.prototype.getChannelData : null;
+  const origCopyFromChannel = typeof AudioBuffer !== "undefined" && typeof AudioBuffer.prototype.copyFromChannel === "function"
+    ? AudioBuffer.prototype.copyFromChannel : null;
+  const ANALYSER_METHODS = ["getFloatFrequencyData", "getByteFrequencyData", "getFloatTimeDomainData", "getByteTimeDomainData"];
+  const origAnalyser = {};
+  if (typeof AnalyserNode !== "undefined") {
+    for (const m of ANALYSER_METHODS) {
+      if (typeof AnalyserNode.prototype[m] === "function") {
+        origAnalyser[m] = AnalyserNode.prototype[m];
+      }
+    }
+  }
+  const origStartRendering = typeof OfflineAudioContext !== "undefined" && typeof OfflineAudioContext.prototype.startRendering === "function"
+    ? OfflineAudioContext.prototype.startRendering : null;
+
+  // ── Wrappers (built once) ───────────────────────────────────────────
+  let wrapGetChannelData, wrapCopyFromChannel, wrapStartRendering;
+  const wrapAnalyser = {};
+
+  if (origGetChannelData) {
+    wrapGetChannelData = function (channel) {
       if (mode === "block") return new Float32Array(this.length);
-      // stabilize: cache per channel index
       let arr = channelCache.get(this);
       if (!arr) { arr = []; channelCache.set(this, arr); }
       if (arr[channel]) return arr[channel];
-      const r = orig.call(this, channel);
+      const r = origGetChannelData.call(this, channel);
       arr[channel] = r;
       return r;
     };
+    fnWrapperMap.set(wrapGetChannelData, origGetChannelData);
+    copyFnIdentity(wrapGetChannelData, origGetChannelData);
+  }
+
+  if (origCopyFromChannel) {
+    wrapCopyFromChannel = function (destination, channelNumber, bufferOffset) {
+      if (mode === "block") { destination.fill(0); return; }
+      let arr = channelCache.get(this);
+      if (!arr) { arr = []; channelCache.set(this, arr); }
+      if (!arr[channelNumber]) arr[channelNumber] = origGetChannelData.call(this, channelNumber);
+      const src = arr[channelNumber];
+      const offset = bufferOffset || 0;
+      const len = Math.min(destination.length, src.length - offset);
+      for (let i = 0; i < len; i++) destination[i] = src[offset + i];
+    };
+    fnWrapperMap.set(wrapCopyFromChannel, origCopyFromChannel);
+    copyFnIdentity(wrapCopyFromChannel, origCopyFromChannel);
+  }
+
+  for (const methodName of ANALYSER_METHODS) {
+    const orig = origAnalyser[methodName];
+    if (!orig) continue;
+    const wrap = function (array) {
+      if (mode === "block") { array.fill(0); return; }
+      let bag = analyserCache.get(this);
+      if (!bag) { bag = {}; analyserCache.set(this, bag); }
+      const cached = bag[methodName];
+      if (cached) {
+        const len = Math.min(array.length, cached.length);
+        for (let i = 0; i < len; i++) array[i] = cached[i];
+        return;
+      }
+      orig.call(this, array);
+      bag[methodName] = array.slice();
+    };
     fnWrapperMap.set(wrap, orig);
     copyFnIdentity(wrap, orig);
-    AudioBuffer.prototype.getChannelData = wrap;
-
-    // copyFromChannel(destination, channelNumber, bufferOffset)
-    const origCopy = AudioBuffer.prototype.copyFromChannel;
-    if (typeof origCopy === "function") {
-      const wrapCopy = function (destination, channelNumber, bufferOffset) {
-        if (mode === "off") return origCopy.call(this, destination, channelNumber, bufferOffset);
-        if (mode === "block") { destination.fill(0); return; }
-        // stabilize: read from cached channel data
-        let arr = channelCache.get(this);
-        if (!arr) { arr = []; channelCache.set(this, arr); }
-        if (!arr[channelNumber]) arr[channelNumber] = orig.call(this, channelNumber);
-        const src = arr[channelNumber];
-        const offset = bufferOffset || 0;
-        const len = Math.min(destination.length, src.length - offset);
-        for (let i = 0; i < len; i++) destination[i] = src[offset + i];
-      };
-      fnWrapperMap.set(wrapCopy, origCopy);
-      copyFnIdentity(wrapCopy, origCopy);
-      AudioBuffer.prototype.copyFromChannel = wrapCopy;
-    }
+    wrapAnalyser[methodName] = wrap;
   }
 
-  // ── AnalyserNode getters ────────────────────────────────────────────
-  if (typeof AnalyserNode !== "undefined") {
-    for (const methodName of ["getFloatFrequencyData", "getByteFrequencyData", "getFloatTimeDomainData", "getByteTimeDomainData"]) {
-      const orig = AnalyserNode.prototype[methodName];
-      if (typeof orig !== "function") continue;
-      const wrap = function (array) {
-        if (mode === "off") return orig.call(this, array);
-        if (mode === "block") { array.fill(0); return; }
-        let bag = analyserCache.get(this);
-        if (!bag) { bag = {}; analyserCache.set(this, bag); }
-        const cached = bag[methodName];
-        if (cached) {
-          // Copy from cache into caller's array (matches native sig)
-          const len = Math.min(array.length, cached.length);
-          for (let i = 0; i < len; i++) array[i] = cached[i];
-          return;
+  if (origStartRendering) {
+    wrapStartRendering = function () {
+      if (mode === "block") {
+        try {
+          const buf = new AudioBuffer({
+            length: this.length,
+            sampleRate: this.sampleRate,
+            numberOfChannels: 1,
+          });
+          return Promise.resolve(buf);
+        } catch (e) {
+          return Promise.reject(e);
         }
-        orig.call(this, array);
-        // Snapshot a copy so the user's array can be mutated later
-        // without polluting the cache.
-        bag[methodName] = array.slice();
-      };
-      fnWrapperMap.set(wrap, orig);
-      copyFnIdentity(wrap, orig);
-      AnalyserNode.prototype[methodName] = wrap;
-    }
+      }
+      const cached = renderCache.get(this);
+      if (cached) return Promise.resolve(cached);
+      const self = this;
+      return origStartRendering.apply(this, arguments).then(buffer => {
+        if (buffer) renderCache.set(self, buffer);
+        return buffer;
+      });
+    };
+    fnWrapperMap.set(wrapStartRendering, origStartRendering);
+    copyFnIdentity(wrapStartRendering, origStartRendering);
   }
 
-  // ── OfflineAudioContext.startRendering ──────────────────────────────
-  if (typeof OfflineAudioContext !== "undefined") {
-    const orig = OfflineAudioContext.prototype.startRendering;
-    if (typeof orig === "function") {
-      const wrap = function () {
-        if (mode === "off") return orig.apply(this, arguments);
-        if (mode === "block") {
-          // Resolve a silent buffer matching this context's shape.
-          try {
-            const buf = new AudioBuffer({
-              length: this.length,
-              sampleRate: this.sampleRate,
-              numberOfChannels: 1,
-            });
-            return Promise.resolve(buf);
-          } catch (e) {
-            return Promise.reject(e);
-          }
-        }
-        const cached = renderCache.get(this);
-        if (cached) return Promise.resolve(cached);
-        const self = this;
-        return orig.apply(this, arguments).then(buffer => {
-          if (buffer) renderCache.set(self, buffer);
-          return buffer;
-        });
-      };
-      fnWrapperMap.set(wrap, orig);
-      copyFnIdentity(wrap, orig);
-      OfflineAudioContext.prototype.startRendering = wrap;
-    }
+  // ── Lazy install / uninstall ────────────────────────────────────────
+  let installed = false;
+  function install() {
+    if (installed) return;
+    if (wrapGetChannelData)  AudioBuffer.prototype.getChannelData = wrapGetChannelData;
+    if (wrapCopyFromChannel) AudioBuffer.prototype.copyFromChannel = wrapCopyFromChannel;
+    for (const m of ANALYSER_METHODS) if (wrapAnalyser[m]) AnalyserNode.prototype[m] = wrapAnalyser[m];
+    if (wrapStartRendering)  OfflineAudioContext.prototype.startRendering = wrapStartRendering;
+    installed = true;
+  }
+  function uninstall() {
+    if (!installed) return;
+    if (origGetChannelData)  AudioBuffer.prototype.getChannelData = origGetChannelData;
+    if (origCopyFromChannel) AudioBuffer.prototype.copyFromChannel = origCopyFromChannel;
+    for (const m of ANALYSER_METHODS) if (origAnalyser[m]) AnalyserNode.prototype[m] = origAnalyser[m];
+    if (origStartRendering)  OfflineAudioContext.prototype.startRendering = origStartRendering;
+    installed = false;
   }
 
   // ── Per-site mode override ──────────────────────────────────────────
@@ -154,5 +170,7 @@
       const v = values && values["audio.mode"];
       if (v === "off" || v === "stabilize" || v === "block") mode = v;
     } catch { /* malformed */ }
+    if (mode === "off") uninstall();
+    else install();
   }, { once: true });
 })();

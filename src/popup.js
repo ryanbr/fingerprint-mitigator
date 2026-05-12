@@ -143,6 +143,7 @@ function isCategoryModified(category) {
 // every per-site change), so re-querying the DOM each time is wasteful.
 const $masterLabel = document.getElementById("master-btn-label");
 const $masterDesc    = document.getElementById("master-btn-desc");
+const $powerBtn      = document.getElementById("power-toggle");
 const $catToggles = {};   // category → toggle element
 const $catRows    = {};   // category → row element
 for (const cat of CATEGORIES) {
@@ -168,6 +169,10 @@ function applyToggleStates() {
   if ($masterDesc) $masterDesc.textContent = masked
     ? "Masking is currently active. Click to turn off for this site."
     : "Masking is currently off on this site. Click to re-enable.";
+  if ($powerBtn) {
+    $powerBtn.classList.toggle("is-off", !masked);
+    $powerBtn.title = masked ? "Disable on this site" : "Re-enable on this site";
+  }
   document.body.classList.toggle("master-off", !masked);
 
   for (const cat of CATEGORIES) {
@@ -177,7 +182,12 @@ function applyToggleStates() {
     el.classList.toggle("on", on);
     el.setAttribute("aria-checked", String(on));
     const row = $catRows[cat];
-    if (row) row.classList.toggle("modified", isCategoryModified(cat));
+    if (row) {
+      row.classList.toggle("modified", isCategoryModified(cat));
+      // cat-off → CSS dims the adjacent expand-content (sub-checks +
+      // value inputs aren't actually applied when the category is off).
+      row.classList.toggle("cat-off", !on);
+    }
   }
 
   // Sub-check toggles
@@ -297,6 +307,8 @@ $masterToggle.addEventListener("keydown", (e) => {
     setMasterToggle(!isMasked());
   }
 });
+// Header power icon — quick-access alternative to the master button.
+$powerBtn?.addEventListener("click", () => setMasterToggle(!isMasked()));
 
 for (const cat of CATEGORIES) {
   const el = document.getElementById("cat-" + cat);
@@ -369,6 +381,33 @@ chrome.storage.local.get(["disabledDomains", "siteOverrides"], (s) => {
   siteOverrides = s.siteOverrides || {};
   applyToggleStates();
 });
+
+// ── Auto-detect Chromium version for defaults ────────────────────────
+// Mirror background.js's detection so the popup-displayed defaults
+// for clientHints.brand and uaData.uaFullVersion match the HTTP-layer
+// rules. Without this, the popup shows "Chrome 148" while DNR sends
+// "Chrome 152" — confusing the user and creating a mismatch if they
+// hand-tweak from the displayed default.
+const DETECTED_CHROMIUM_VERSION = (() => {
+  try {
+    const m = (navigator.userAgent || "").match(/Chrome\/(\d+)/);
+    return m && m[1] ? m[1] : "148";
+  } catch { return "148"; }
+})();
+
+(function applyDynamicDefaults() {
+  const v = DETECTED_CHROMIUM_VERSION;
+  const brand = `"Google Chrome";v="${v}", "Chromium";v="${v}", "Not_A Brand";v="24"`;
+  const uaFull = `${v}.0.0.0`;
+  // Setting .defaultValue updates what el.defaultValue returns AND
+  // the visible value (until the user types). The value-input event-
+  // wiring loop later reads el.defaultValue → dataset.defaultValue →
+  // applyToggleStates uses it as the "is this overridden?" baseline.
+  const brandEl  = document.querySelector('[data-value-key="clientHints.brand"]');
+  const uaFullEl = document.querySelector('[data-value-key="uaData.uaFullVersion"]');
+  if (brandEl)  { brandEl.defaultValue  = brand;  brandEl.value  = brand;  }
+  if (uaFullEl) { uaFullEl.defaultValue = uaFull; uaFullEl.value = uaFull; }
+})();
 
 // ── Tabs + Log panel ──────────────────────────────────────────────────
 // "Settings" tab (the main config UI) and "Log" tab (a console-style
@@ -446,22 +485,36 @@ function renderLog() {
       `<span class="src">[${escHtml(catSrc)}]</span>`
     );
 
-    // Sub-checks
+    // Sub-checks. If the parent category is OFF, the sub-check isn't
+    // in effect at all — the inject script for that category isn't
+    // even loaded for this site. Show as "—" with a "(category off)"
+    // note instead of the misleading "ON [default]".
     for (const sk of subKeys) {
-      const on = getSubCheckEnabled(sk);
-      const ov = matchKey ? siteOverrides[matchKey].subChecks : null;
-      const isOverride = ov && ov[sk] === false;
-      const src = isOverride
-        ? (matchKey === key ? "this site" : "inherited:" + matchKey)
-        : "default";
+      let stateClass, stateText, srcText;
+      if (!catOn) {
+        stateClass = "off";
+        stateText = "—  ";
+        srcText = "category off";
+      } else {
+        const on = getSubCheckEnabled(sk);
+        const ov = matchKey ? siteOverrides[matchKey].subChecks : null;
+        const isOverride = ov && ov[sk] === false;
+        stateClass = on ? "on" : "off";
+        stateText = on ? "ON " : "OFF";
+        srcText = isOverride
+          ? (matchKey === key ? "this site" : "inherited:" + matchKey)
+          : "default";
+      }
       lines.push(
         `    ${pad(sk, 22)} ` +
-        `<span class="${on ? "on" : "off"}">${on ? "ON " : "OFF"}</span> ` +
-        `<span class="src">[${escHtml(src)}]</span>`
+        `<span class="${stateClass}">${stateText}</span> ` +
+        `<span class="src">[${escHtml(srcText)}]</span>`
       );
     }
 
-    // Values
+    // Values. Same gating: when the parent category is OFF, the
+    // configured value isn't applied. Show the configured value but
+    // mark it inactive.
     for (const el of valEls) {
       const vk = el.dataset.valueKey;
       const def = el.dataset.defaultValue !== undefined
@@ -471,13 +524,16 @@ function renderLog() {
       const isOverride = String(cur) !== String(def);
       const ovValues = matchKey ? siteOverrides[matchKey].values : null;
       const explicitOverride = ovValues && ovValues[vk] !== undefined;
-      const src = explicitOverride
-        ? (matchKey === key ? "this site" : "inherited:" + matchKey)
-        : "default";
+      const srcText = !catOn
+        ? "category off"
+        : (explicitOverride
+            ? (matchKey === key ? "this site" : "inherited:" + matchKey)
+            : "default");
+      const valueClass = !catOn ? "off" : (isOverride ? "override" : "");
       lines.push(
         `    ${pad(vk, 22)} = ` +
-        `<span class="${isOverride ? "override" : ""}">${escHtml(fmtValue(cur))}</span> ` +
-        `<span class="src">[${escHtml(src)}]</span>`
+        `<span class="${valueClass}">${escHtml(fmtValue(cur))}</span> ` +
+        `<span class="src">[${escHtml(srcText)}]</span>`
       );
     }
 
@@ -642,6 +698,20 @@ $presetSelector?.addEventListener("change", () => {
 });
 
 // ── Reset / manage buttons ────────────────────────────────────────────
+// ── Auto-disable list checkbox ────────────────────────────────────────
+// Toggles whether the curated list of captcha-sensitive sites (Google
+// search, recaptcha.net, hcaptcha.com) gets added to the effectively-
+// disabled set. Default ON. Setting persists across sessions; flipping
+// it triggers background.js to re-register content scripts + DNR rules
+// (storage.onChanged in background listens for this key).
+const $autoDisable = document.getElementById("auto-disable-checkbox");
+chrome.storage.local.get(["autoDisableEnabled"], (s) => {
+  if ($autoDisable) $autoDisable.checked = s.autoDisableEnabled !== false;
+});
+$autoDisable?.addEventListener("change", () => {
+  chrome.storage.local.set({ autoDisableEnabled: $autoDisable.checked });
+});
+
 document.getElementById("reset-site")?.addEventListener("click", () => {
   const key = normalizeDomain(currentDomain);
   if (!key) return;
@@ -665,6 +735,9 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   if (!isToggleableUrl(url)) {
     $url.textContent = "(masking not available on this page)";
     document.querySelectorAll(".toggle-row").forEach(r => r.style.display = "none");
+    // Header power icon is meaningless on non-http pages — nothing to
+    // disable. Hide it alongside the rest of the action UI.
+    if ($powerBtn) $powerBtn.style.display = "none";
     return;
   }
   $url.textContent = currentDomain || "(unknown)";

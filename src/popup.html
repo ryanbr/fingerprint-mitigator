@@ -58,6 +58,14 @@
       cursor: pointer;
     }
     .theme-btn:hover { background: var(--border); color: var(--text); }
+    /* Quick-access power icon — same role as the master button below,
+       but reachable without scrolling. Red when site is disabled. */
+    .power-btn.is-off {
+      background: var(--high);
+      border-color: var(--high);
+      color: #fff;
+    }
+    .power-btn.is-off:hover { background: var(--high); }
 
     .status-block {
       padding: 14px 16px;
@@ -228,6 +236,14 @@
       opacity: 0.4;
       pointer-events: none;
     }
+    /* When a category is OFF for this site, its sub-checks and value
+       inputs in the expansion aren't actually applied — the inject
+       script for that category isn't loaded. Dim the expand-content
+       so the visual state matches reality. */
+    .toggle-row.cat-off + .expand-content {
+      opacity: 0.4;
+      pointer-events: none;
+    }
     /* Visual indicator for categories with non-default settings on the
        current site. Left-edge stripe + subtle background tint. */
     .toggle-row.modified {
@@ -340,6 +356,12 @@
       <circle cx="16.5" cy="12" r="1" fill="currentColor" stroke="none"/>
     </svg>
     <h1>Fingerprint Mitigator</h1>
+    <button class="theme-btn power-btn" id="power-toggle" title="Disable on this site" aria-label="Toggle site masking">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+        <line x1="12" y1="2" x2="12" y2="12"/>
+      </svg>
+    </button>
     <button class="theme-btn" id="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle theme">
       <svg id="theme-icon-dark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
@@ -857,7 +879,14 @@
 
   <div class="info-section">
     Each toggle is per-site. Off here ≠ off everywhere. Changes reload the tab so they take effect immediately.
-    <div style="margin-top:10px; display:flex; gap:8px">
+    <div style="margin-top:10px; display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px solid var(--border)">
+      <label style="flex:1; cursor:pointer; user-select:none; font-size:12px">
+        <input type="checkbox" id="auto-disable-checkbox" style="vertical-align:middle; margin-right:6px">
+        Auto-disable on Google search + captcha sites
+        <span style="display:block; font-size:11px; color:var(--text-faint); margin-top:2px; margin-left:22px">Skips google.com / regional Google domains / recaptcha.net / hcaptcha.com to avoid captcha breakage.</span>
+      </label>
+    </div>
+    <div style="margin-top:6px; display:flex; gap:8px">
       <button id="reset-site" type="button">Reset this site</button>
       <button id="manage-all" type="button">Manage all sites…</button>
     </div>

@@ -14,11 +14,60 @@
 
 const ALWAYS_EXCLUDE_HOSTS = ["challenges.cloudflare.com"];
 
-// Default Sec-CH-UA brand string. Version should track current
-// stable Chromium so the HTTP layer agrees with the JS-side
-// userAgentData.brands. Bump when the Chromium major rolls forward.
+// Curated list of sites that almost always break under fingerprint
+// masking (Google search uses reCAPTCHA-style checks, the reCAPTCHA
+// host itself, hCaptcha). Applied via storage flag `autoDisableEnabled`
+// (default true); user can disable the whole list from the popup, or
+// override specific entries by adding them back manually if they want.
+const AUTO_DISABLED_DOMAINS = [
+  // Google search (main + major regional ccTLDs). The
+  // hostsToExcludeMatches helper expands each to `*://host/*` +
+  // `*://*.host/*`, so accounts.google.com / mail.google.com /
+  // www.google.co.uk etc. are all covered.
+  "google.com",
+  "google.co.uk", "google.de", "google.fr", "google.es", "google.it",
+  "google.nl", "google.pl", "google.com.tr", "google.ru",
+  "google.com.au", "google.ca", "google.co.jp", "google.co.in",
+  "google.co.kr", "google.com.tw", "google.com.hk", "google.com.sg",
+  "google.com.br", "google.com.mx", "google.co.za",
+  // Captcha providers
+  "recaptcha.net",
+  "hcaptcha.com",
+];
+
+// Combine user master-disable + auto-disable list. Used to decide
+// what's excluded at the bridge level and as a baseline for every
+// category's per-category exclude list. Auto-disable list only
+// applies when chrome.storage.local.autoDisableEnabled !== false
+// (default true).
+function effectivelyDisabledHosts(stored) {
+  const out = new Set();
+  const disabled = stored.disabledDomains || {};
+  for (const d of Object.keys(disabled)) if (disabled[d]) out.add(d);
+  if (stored.autoDisableEnabled !== false) {
+    for (const h of AUTO_DISABLED_DOMAINS) out.add(h);
+  }
+  return [...out];
+}
+
+// Detect this browser's actual Chromium major version from the SW's
+// navigator.userAgent. Using the real version on the HTTP layer
+// keeps Sec-CH-UA consistent with what JS-land navigator.userAgent
+// reports — reCAPTCHA / hCaptcha / FingerprintJS all flag the
+// mismatch. Falls back to a baseline if the UA string is missing or
+// unparseable (e.g. on Firefox where there's no Chrome/X.Y token).
+const DETECTED_CHROMIUM_VERSION = (() => {
+  try {
+    const m = (navigator.userAgent || "").match(/Chrome\/(\d+)/);
+    return m && m[1] ? m[1] : "148";
+  } catch { return "148"; }
+})();
+
+// Default Sec-CH-UA brand string. Auto-tracks the user's actual
+// Chromium major. Per-site overrides via siteOverrides.values
+// ["clientHints.brand"] still take precedence.
 const FAKE_SEC_CH_UA =
-  '"Google Chrome";v="148", "Chromium";v="148", "Not_A Brand";v="24"';
+  `"Google Chrome";v="${DETECTED_CHROMIUM_VERSION}", "Chromium";v="${DETECTED_CHROMIUM_VERSION}", "Not_A Brand";v="24"`;
 
 // Category id → injected JS file. Each category is its own
 // chrome.scripting registration so per-site exclude_matches can
@@ -41,16 +90,12 @@ const CATEGORY_SCRIPTS = {
 };
 
 // Compute the list of hostnames for which a given category should be
-// skipped (whole-site off OR explicit category-off override). Takes
-// pre-read storage so a refresh can fetch storage once and reuse for
-// every category + the DNR rules.
+// skipped (effectively-disabled OR explicit category-off override).
+// Takes pre-read storage so a refresh can fetch storage once and
+// reuse for every category + the DNR rules.
 function excludedHostsForCategory(category, stored) {
-  const disabled = stored.disabledDomains || {};
   const overrides = stored.siteOverrides || {};
-  const out = new Set();
-  for (const d of Object.keys(disabled)) {
-    if (disabled[d]) out.add(d);
-  }
+  const out = new Set(effectivelyDisabledHosts(stored));
   for (const d of Object.keys(overrides)) {
     if (overrides[d] && overrides[d][category] === false) out.add(d);
   }
@@ -74,14 +119,12 @@ async function registerInjectScripts(stored) {
 
   // Bridge runs in ISOLATED world and dispatches per-site sub-check /
   // value overrides to the MAIN-world category scripts. Excluded from
-  // master-disabled sites only (per-category disables don't need the
-  // bridge since the category script isn't registered).
-  const disabled = stored.disabledDomains || {};
-  const masterDisabled = Object.keys(disabled).filter(k => disabled[k]);
+  // effectively-disabled sites (user master-disable + auto-disable
+  // curated list when enabled).
   scripts.push({
     id: "fpmit-bridge",
     matches: ["<all_urls>"],
-    excludeMatches: hostsToExcludeMatches(masterDisabled),
+    excludeMatches: hostsToExcludeMatches(effectivelyDisabledHosts(stored)),
     js: ["src/bridge.js"],
     runAt: "document_start",
     world: "ISOLATED",
@@ -147,13 +190,12 @@ function buildHeaderActions(brand, mobile, platform, mode) {
 }
 
 async function updateSecChUaRules(stored) {
-  const disabled = stored.disabledDomains || {};
   const overrides = stored.siteOverrides || {};
 
   // Sites where the clientHints category is fully off (master OR
-  // per-category override). These get NO rule at all.
-  const offSet = new Set();
-  for (const s of Object.keys(disabled)) if (disabled[s]) offSet.add(s);
+  // per-category override OR in the auto-disable list). These get
+  // NO rule at all so Sec-CH-UA passes through unmodified.
+  const offSet = new Set(effectivelyDisabledHosts(stored));
   for (const s of Object.keys(overrides)) {
     if (overrides[s] && overrides[s].clientHints === false) offSet.add(s);
   }
@@ -232,7 +274,9 @@ async function updateSecChUaRules(stored) {
 
 async function refreshAll() {
   // Single storage read shared across both refreshers.
-  const stored = await chrome.storage.local.get(["disabledDomains", "siteOverrides"]);
+  const stored = await chrome.storage.local.get([
+    "disabledDomains", "siteOverrides", "autoDisableEnabled",
+  ]);
   registerInjectScripts(stored).catch(() => {});
   updateSecChUaRules(stored).catch(() => {});
 }
@@ -242,5 +286,7 @@ chrome.runtime.onStartup.addListener(refreshAll);
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes.disabledDomains || changes.siteOverrides) refreshAll();
+  if (changes.disabledDomains || changes.siteOverrides || changes.autoDisableEnabled) {
+    refreshAll();
+  }
 });

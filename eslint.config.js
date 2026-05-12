@@ -60,6 +60,7 @@ export default [
         window: "readonly",
         document: "readonly",
         location: "readonly",
+        navigator: "readonly",
         URL: "readonly",
         CustomEvent: "readonly",
         chrome: "readonly",

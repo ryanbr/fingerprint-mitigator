@@ -14,6 +14,7 @@ export default [
         location: "readonly",
         Navigator: "readonly",
         NavigatorUAData: "readonly",
+        Location: "readonly",
         NetworkInformation: "readonly",
         HTMLCanvasElement: "readonly",
         CanvasRenderingContext2D: "readonly",

@@ -401,6 +401,11 @@
         <optgroup label="Edge">
           <option value="edge-148-win">Edge 148 / Windows</option>
         </optgroup>
+        <optgroup label="Vivaldi">
+          <option value="vivaldi-79-win">Vivaldi 7.9 / Windows</option>
+          <option value="vivaldi-79-mac">Vivaldi 7.9 / macOS</option>
+          <option value="vivaldi-79-linux">Vivaldi 7.9 / Linux</option>
+        </optgroup>
         <optgroup label="Firefox">
           <option value="firefox-142-win">Firefox 142 / Windows</option>
           <option value="firefox-142-mac">Firefox 142 / macOS</option>
@@ -442,6 +447,10 @@
     <div class="sub-check-row">
       <span class="sub-check-label">Strip <code>userAgent</code> identity tokens</span>
       <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="identity.uaStrip"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Block vendor schemes (<code>vivaldi://</code>, <code>brave://</code>, …)</span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="identity.protocolBlock"></div>
     </div>
     <div class="sub-check-row">
       <span class="sub-check-label">Custom <code>userAgent</code></span>

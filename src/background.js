@@ -169,23 +169,30 @@ const DNR_RESOURCE_TYPES = [
   "ping", "csp_report", "other",
 ];
 
-function buildHeaderActions(brand, mobile, platform, mode) {
+function buildHeaderActions(brand, mobile, platform, mode, customUA) {
   // mode === "remove" → strip Sec-CH-UA entirely (Firefox / Safari
   // don't send any of these). Otherwise behave as the configurable
   // Chrome-set mode: set the brand list + optional Mobile / Platform.
+  // customUA, when present, also rewrites the User-Agent HTTP header
+  // so server-side UA sniffing sees the same value JS does. Defeats
+  // the document_start race for sites that sniff UA server-side
+  // (vivaldi.com serves different HTML based on the UA header).
+  let out;
   if (mode === "remove") {
-    return [
+    out = [
       { header: "Sec-CH-UA", operation: "remove" },
       { header: "Sec-CH-UA-Mobile", operation: "remove" },
       { header: "Sec-CH-UA-Platform", operation: "remove" },
       ...HIGH_ENTROPY_REMOVES,
     ];
+  } else {
+    out = [];
+    if (brand) out.push({ header: "Sec-CH-UA", operation: "set", value: brand });
+    if (mobile) out.push({ header: "Sec-CH-UA-Mobile", operation: "set", value: mobile });
+    if (platform) out.push({ header: "Sec-CH-UA-Platform", operation: "set", value: platform });
+    out.push(...HIGH_ENTROPY_REMOVES);
   }
-  const out = [];
-  if (brand) out.push({ header: "Sec-CH-UA", operation: "set", value: brand });
-  if (mobile) out.push({ header: "Sec-CH-UA-Mobile", operation: "set", value: mobile });
-  if (platform) out.push({ header: "Sec-CH-UA-Platform", operation: "set", value: platform });
-  out.push(...HIGH_ENTROPY_REMOVES);
+  if (customUA) out.push({ header: "User-Agent", operation: "set", value: customUA });
   return out;
 }
 
@@ -201,7 +208,11 @@ async function updateSecChUaRules(stored) {
   }
 
   // Sites with per-site value overrides (any of brand / mobile /
-  // platform / mode). These get their own rule with priority 2.
+  // platform / mode / customUA). These get their own rule with
+  // priority 2. customUA is only honoured at the HTTP layer when the
+  // identity category is on for the site — otherwise JS-land would
+  // report the real UA while HTTP-land reports the spoofed one, which
+  // is itself a fingerprint.
   const customSites = {};
   for (const site of Object.keys(overrides)) {
     if (offSet.has(site)) continue;
@@ -211,8 +222,10 @@ async function updateSecChUaRules(stored) {
     const mobile   = v["clientHints.mobile"];
     const platform = v["clientHints.platform"];
     const mode     = v["clientHints.mode"];
-    if (brand || mobile || platform || mode === "remove") {
-      customSites[site] = { brand, mobile, platform, mode };
+    const identityOn = overrides[site].identity !== false;
+    const customUA   = identityOn ? v["identity.customUA"] : null;
+    if (brand || mobile || platform || mode === "remove" || customUA) {
+      customSites[site] = { brand, mobile, platform, mode, customUA };
     }
   }
 
@@ -251,6 +264,7 @@ async function updateSecChUaRules(stored) {
           v.mobile || null,
           v.platform || null,
           v.mode || null,
+          v.customUA || null,
         ),
       },
       condition: {

@@ -10,6 +10,7 @@
 //   identity.brands          filter userAgentData.brands / getHEV / toJSON
 //   identity.vendorGlobals   hide window.opr / opera / vivaldi / etc.
 //   identity.uaStrip         strip identity tokens from navigator.userAgent
+//   identity.protocolBlock   swallow vendor-scheme navigations (vivaldi://, brave://, ...)
 //
 // Plus one value override:
 //   identity.customUA        replace navigator.userAgent with a custom string
@@ -266,6 +267,94 @@
       };
     }
   } catch { /* protected */ }
+
+  // ── Vendor-protocol navigation guard ────────────────────────────────
+  // When a page believes we're Vivaldi/Brave/Opera/etc. (often as a
+  // direct consequence of the customUA spoof), it may deep-link into
+  // the actual browser via vivaldi://, brave://, opera://, yandex:// or
+  // whale://. Chrome then shows the OS "Open in <X>?" handler popup.
+  // Swallow these schemes when navigated from script or anchor clicks
+  // so the popup never fires.
+  {
+    const VENDOR_SCHEME_RE = /^\s*(?:vivaldi|brave|opera|opera-gx|yandex|whale):/i;
+    const isVendorScheme = (s) => {
+      try { return typeof s === "string" && VENDOR_SCHEME_RE.test(s); }
+      catch { return false; }
+    };
+
+    const restores = [];
+
+    try {
+      const desc = Object.getOwnPropertyDescriptor(Location.prototype, "href");
+      if (desc && desc.set) {
+        const origSet = desc.set;
+        const newSet = function (v) {
+          if (isVendorScheme(v)) return;
+          return origSet.call(this, v);
+        };
+        fnWrapperMap.set(newSet, origSet);
+        copyFnIdentity(newSet, origSet);
+        Object.defineProperty(Location.prototype, "href", { ...desc, set: newSet });
+        restores.push(() => Object.defineProperty(Location.prototype, "href", desc));
+      }
+    } catch { /* protected */ }
+
+    for (const method of ["assign", "replace"]) {
+      try {
+        const orig = Location.prototype[method];
+        if (typeof orig === "function") {
+          const wrapped = function (v) {
+            if (isVendorScheme(v)) return;
+            return orig.call(this, v);
+          };
+          fnWrapperMap.set(wrapped, orig);
+          copyFnIdentity(wrapped, orig);
+          Location.prototype[method] = wrapped;
+          restores.push(() => { Location.prototype[method] = orig; });
+        }
+      } catch { /* protected */ }
+    }
+
+    try {
+      const origOpen = window.open;
+      if (typeof origOpen === "function") {
+        const newOpen = function (url, ...rest) {
+          if (isVendorScheme(url)) return null;
+          return origOpen.call(this, url, ...rest);
+        };
+        fnWrapperMap.set(newOpen, origOpen);
+        copyFnIdentity(newOpen, origOpen);
+        window.open = newOpen;
+        restores.push(() => { window.open = origOpen; });
+      }
+    } catch { /* protected */ }
+
+    // Capture-phase click swallow — vivaldi.com pages may use plain
+    // <a href="vivaldi://..."> deep links. Walk up from event target
+    // to find the enclosing anchor (handles nested spans/icons inside
+    // the link).
+    const onClick = (ev) => {
+      let node = ev.target;
+      while (node && node.nodeType === 1) {
+        if (node.tagName === "A" && node.getAttribute) {
+          if (isVendorScheme(node.getAttribute("href"))) {
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+          }
+          return;
+        }
+        node = node.parentNode;
+      }
+    };
+    document.addEventListener("click", onClick, true);
+    restores.push(() => document.removeEventListener("click", onClick, true));
+
+    if (restores.length > 0) {
+      uninstallers["identity.protocolBlock"] = () => {
+        for (const r of restores) { try { r(); } catch { /* sealed */ } }
+      };
+    }
+  }
 
   // ── Per-site settings ────────────────────────────────────────────────
   document.addEventListener("__fpmit_settings", (e) => {

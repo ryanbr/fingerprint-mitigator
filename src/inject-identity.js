@@ -330,20 +330,15 @@
     } catch { /* protected */ }
 
     // Capture-phase click swallow — vivaldi.com pages may use plain
-    // <a href="vivaldi://..."> deep links. Walk up from event target
-    // to find the enclosing anchor (handles nested spans/icons inside
-    // the link).
+    // <a href="vivaldi://..."> deep links. closest() finds the
+    // enclosing anchor for clicks on nested spans/icons inside the link.
     const onClick = (ev) => {
-      let node = ev.target;
-      while (node && node.nodeType === 1) {
-        if (node.tagName === "A" && node.getAttribute) {
-          if (isVendorScheme(node.getAttribute("href"))) {
-            ev.preventDefault();
-            ev.stopImmediatePropagation();
-          }
-          return;
-        }
-        node = node.parentNode;
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      const a = t.closest("a");
+      if (a && isVendorScheme(a.getAttribute("href"))) {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
       }
     };
     document.addEventListener("click", onClick, true);

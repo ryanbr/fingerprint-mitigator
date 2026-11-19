@@ -198,6 +198,15 @@ function buildHeaderActions(brand, mobile, platform, mode, customUA) {
 
 async function updateSecChUaRules(stored) {
   const overrides = stored.siteOverrides || {};
+  const globalValues = {
+    "clientHints.brand": FAKE_SEC_CH_UA,
+    "clientHints.mobile": null,
+    "clientHints.platform": null,
+    "clientHints.mode": null,
+    "identity.customUA": null,
+    ...stored.globalDefaultPreset?.values,
+  };
+  const identityOffHosts = excludedHostsForCategory("identity", stored);
 
   // Sites where the clientHints category is fully off (master OR
   // per-category override OR in the auto-disable list). These get
@@ -216,17 +225,16 @@ async function updateSecChUaRules(stored) {
   const customSites = {};
   for (const site of Object.keys(overrides)) {
     if (offSet.has(site)) continue;
-    const v = overrides[site].values;
-    if (!v) continue;
-    const brand    = v["clientHints.brand"];
-    const mobile   = v["clientHints.mobile"];
-    const platform = v["clientHints.platform"];
-    const mode     = v["clientHints.mode"];
-    const identityOn = overrides[site].identity !== false;
-    const customUA   = identityOn ? v["identity.customUA"] : null;
-    if (brand || mobile || platform || mode === "remove" || customUA) {
-      customSites[site] = { brand, mobile, platform, mode, customUA };
-    }
+    if (!overrides[site]) continue;
+    const v = { ...globalValues, ...overrides[site].values };
+    const identityOn = !identityOffHosts.some(host => site === host || site.endsWith(`.${host}`));
+    customSites[site] = {
+      brand: v["clientHints.brand"],
+      mobile: v["clientHints.mobile"],
+      platform: v["clientHints.platform"],
+      mode: v["clientHints.mode"],
+      customUA: identityOn ? v["identity.customUA"] : null,
+    };
   }
 
   // ── Base rule ─────────────────────────────────────────────────────
@@ -245,7 +253,13 @@ async function updateSecChUaRules(stored) {
       priority: 1,
       action: {
         type: "modifyHeaders",
-        requestHeaders: buildHeaderActions(FAKE_SEC_CH_UA, null, null),
+        requestHeaders: buildHeaderActions(
+          globalValues["clientHints.brand"],
+          globalValues["clientHints.mobile"],
+          globalValues["clientHints.platform"],
+          globalValues["clientHints.mode"],
+          globalValues["identity.customUA"],
+        ),
       },
       condition: baseCondition,
     },
@@ -260,19 +274,45 @@ async function updateSecChUaRules(stored) {
       action: {
         type: "modifyHeaders",
         requestHeaders: buildHeaderActions(
-          v.brand || FAKE_SEC_CH_UA,
-          v.mobile || null,
-          v.platform || null,
-          v.mode || null,
-          v.customUA || null,
+          v.brand,
+          v.mobile,
+          v.platform,
+          v.mode,
+          v.customUA,
         ),
       },
       condition: {
         resourceTypes: DNR_RESOURCE_TYPES,
         requestDomains: [site],
+        excludedRequestDomains: [
+          ...ALWAYS_EXCLUDE_HOSTS,
+          ...offSet,
+          ...Object.keys(customSites).filter(other => other !== site && other.endsWith(`.${site}`)),
+        ],
       },
     });
   }
+
+  addRules.push({
+    id: 102,
+    priority: 1,
+    action: {
+      type: "modifyHeaders",
+      responseHeaders: [{
+        header: "Content-Security-Policy",
+        operation: "append",
+        value: "worker-src 'none'",
+      }],
+    },
+    condition: {
+      urlFilter: "|http",
+      resourceTypes: ["main_frame", "sub_frame"],
+      excludedRequestDomains: [
+        ...ALWAYS_EXCLUDE_HOSTS,
+        ...excludedHostsForCategory("workers", stored),
+      ],
+    },
+  });
 
   // Clear all prior dynamic rules and reinstall.
   try {
@@ -289,7 +329,7 @@ async function updateSecChUaRules(stored) {
 async function refreshAll() {
   // Single storage read shared across both refreshers.
   const stored = await chrome.storage.local.get([
-    "disabledDomains", "siteOverrides", "autoDisableEnabled",
+    "disabledDomains", "siteOverrides", "autoDisableEnabled", "globalDefaultPreset",
   ]);
   registerInjectScripts(stored).catch(() => {});
   updateSecChUaRules(stored).catch(() => {});
@@ -300,7 +340,7 @@ chrome.runtime.onStartup.addListener(refreshAll);
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes.disabledDomains || changes.siteOverrides || changes.autoDisableEnabled) {
+  if (changes.disabledDomains || changes.siteOverrides || changes.autoDisableEnabled || changes.globalDefaultPreset) {
     refreshAll();
   }
 });

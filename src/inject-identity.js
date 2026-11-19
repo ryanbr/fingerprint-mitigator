@@ -64,6 +64,7 @@
 
   const uninstallers = {};
   let customUA = "";
+  let customPlatform = "";
 
   // userAgentData spoof values. mobile/platform mirror the
   // clientHints.* values so HTTP and JS layers tell the same story.
@@ -268,6 +269,26 @@
     }
   } catch { /* protected */ }
 
+  try {
+    const desc = Object.getOwnPropertyDescriptor(Navigator.prototype, "platform");
+    if (desc && desc.get && desc.configurable) {
+      const origGet = desc.get;
+      const newGet = function () {
+        const platform = origGet.call(this);
+        return customPlatform || platform;
+      };
+      fnWrapperMap.set(newGet, origGet);
+      copyFnIdentity(newGet, origGet);
+      Object.defineProperty(Navigator.prototype, "platform", { ...desc, get: newGet });
+      uninstallers["identity.platform"] = () => {
+        customPlatform = "";
+        Object.defineProperty(Navigator.prototype, "platform", desc);
+      };
+    }
+  } catch {
+    customPlatform = "";
+  }
+
   // ── Vendor-protocol navigation guard ────────────────────────────────
   // When a page believes we're Vivaldi/Brave/Opera/etc. (often as a
   // direct consequence of the customUA spoof), it may deep-link into
@@ -362,6 +383,10 @@
 
       if (typeof values["identity.customUA"] === "string") {
         customUA = values["identity.customUA"];
+      }
+      if (typeof values["identity.platform"] === "string" &&
+          (!subChecks || subChecks["identity.platform"] !== false)) {
+        customPlatform = values["identity.platform"];
       }
 
       // identity.uaDataMode = "remove" → delete navigator.userAgentData

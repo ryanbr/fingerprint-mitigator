@@ -32,6 +32,7 @@ const CATEGORIES = [
   "identity",
   "privacyHints",
   "clientHints",
+  "workers",
   "canvas",
   "audio",
   "webgl",
@@ -55,6 +56,7 @@ const CATEGORY_PREFIXES = {
   identity:     ["identity.", "uaData."],
   privacyHints: ["privacyHints."],
   clientHints:  ["clientHints."],
+  workers:      [],
   canvas:       ["canvas."],
   audio:        ["audio."],
   webgl:        ["webgl."],
@@ -72,6 +74,7 @@ let currentDomain = "";
 let activeTabId = null;
 let disabledDomains = {};
 let siteOverrides = {};
+let globalDefaultPreset = null;
 
 const $url = document.getElementById("site-url");
 const $masterToggle = document.getElementById("site-toggle");
@@ -156,8 +159,11 @@ for (const cat of CATEGORIES) {
 const $subCheckEls = Array.from(document.querySelectorAll("[data-subcheck-key]"));
 const $valueEls    = Array.from(document.querySelectorAll("[data-value-key]"));
 const $resetBtn    = document.getElementById("reset-site");
+const $presetSelector = document.getElementById("preset-selector");
+const $makeDefaultBtn = document.getElementById("make-default");
 
 function applyToggleStates() {
+  applyPresetSelection();
   const masked = isMasked();
   // Button toggles between green "Disable on this site" (currently
   // active) and red "Enable on this site" (currently off).
@@ -274,15 +280,17 @@ function setSubCheck(subKey, on) {
   if (activeTabId) chrome.tabs.reload(activeTabId);
 }
 function getValueOverride(valueKey, defaultValue) {
+  const fallback = globalDefaultPreset?.values?.[valueKey] ?? defaultValue;
   const key = normalizeDomain(currentDomain);
-  if (!key) return defaultValue;
+  if (!key) return fallback;
   const matchKey = findParentKey(siteOverrides, key);
-  if (!matchKey) return defaultValue;
+  if (!matchKey) return fallback;
   const ov = siteOverrides[matchKey];
-  if (!ov.values || ov.values[valueKey] === undefined) return defaultValue;
+  if (!ov.values || ov.values[valueKey] === undefined) return fallback;
   return ov.values[valueKey];
 }
 function setValueOverride(valueKey, value, defaultValue) {
+  defaultValue = globalDefaultPreset?.values?.[valueKey] ?? defaultValue;
   const key = normalizeDomain(currentDomain);
   if (!key) return;
   if (!siteOverrides[key]) siteOverrides[key] = {};
@@ -353,11 +361,14 @@ document.querySelectorAll("[data-value-key]").forEach(el => {
   el.addEventListener("change", () => {
     let v = el.value;
     // Coerce numeric / boolean / null strings back to native types
-    if (el.type === "number") v = Number(v);
-    else if (v === "true") v = true;
-    else if (v === "false") v = false;
-    else if (v === "null") v = null;
-    const typedDefault = el.type === "number" ? Number(def) :
+    if (key !== "identity.platform") {
+      if (el.type === "number") v = Number(v);
+      else if (v === "true") v = true;
+      else if (v === "false") v = false;
+      else if (v === "null") v = null;
+    }
+    const typedDefault = key === "identity.platform" ? def :
+                         el.type === "number" ? Number(def) :
                          def === "true" ? true :
                          def === "false" ? false :
                          def === "null" ? null : def;
@@ -372,13 +383,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes.disabledDomains) disabledDomains = changes.disabledDomains.newValue || {};
   if (changes.siteOverrides) siteOverrides = changes.siteOverrides.newValue || {};
-  if (changes.disabledDomains || changes.siteOverrides) applyToggleStates();
+  if (changes.globalDefaultPreset) globalDefaultPreset = changes.globalDefaultPreset.newValue || null;
+  if (changes.disabledDomains || changes.siteOverrides || changes.globalDefaultPreset) applyToggleStates();
 });
 
 // ── Init ──────────────────────────────────────────────────────────────
-chrome.storage.local.get(["disabledDomains", "siteOverrides"], (s) => {
+chrome.storage.local.get(["disabledDomains", "siteOverrides", "globalDefaultPreset"], (s) => {
   disabledDomains = s.disabledDomains || {};
   siteOverrides = s.siteOverrides || {};
+  globalDefaultPreset = s.globalDefaultPreset || null;
   applyToggleStates();
 });
 
@@ -528,7 +541,7 @@ function renderLog() {
         ? "category off"
         : (explicitOverride
             ? (matchKey === key ? "this site" : "inherited:" + matchKey)
-            : "default");
+            : (globalDefaultPreset?.values?.[vk] !== undefined ? "global default" : "default"));
       const valueClass = !catOn ? "off" : (isOverride ? "override" : "");
       lines.push(
         `    ${pad(vk, 22)} = ` +
@@ -564,6 +577,7 @@ document.querySelectorAll(".tab").forEach(el => {
 const PRESETS = {
   // ── Chrome ──
   "chrome-148-win": {
+    "identity.platform": "Win32",
     "identity.customUA": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
     "identity.uaDataMode": "normal",
     "clientHints.mode": "set",
@@ -581,6 +595,7 @@ const PRESETS = {
     "webgpu.canvasFormat": "bgra8unorm",
   },
   "chrome-148-mac": {
+    "identity.platform": "MacIntel",
     "identity.customUA": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
     "identity.uaDataMode": "normal",
     "clientHints.mode": "set",
@@ -598,6 +613,7 @@ const PRESETS = {
     "webgpu.canvasFormat": "rgba8unorm",
   },
   "chrome-148-linux": {
+    "identity.platform": "Linux x86_64",
     "identity.customUA": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
     "identity.uaDataMode": "normal",
     "clientHints.mode": "set",
@@ -615,6 +631,7 @@ const PRESETS = {
     "webgpu.canvasFormat": "bgra8unorm",
   },
   "chrome-148-android": {
+    "identity.platform": "Linux armv8l",
     "identity.customUA": "Mozilla/5.0 (Linux; Android 14; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36",
     "identity.uaDataMode": "normal",
     "clientHints.mode": "set",
@@ -638,6 +655,7 @@ const PRESETS = {
   //    vivaldi.com itself: their platform-detect.js does
   //    `ua.match(/Vivaldi/)` to add an "is-vivaldi" class.) ──
   "vivaldi-79-win": {
+    "identity.platform": "Win32",
     "identity.customUA": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Vivaldi/7.9.3970.64",
     "identity.uaDataMode": "normal",
     "clientHints.mode": "set",
@@ -655,6 +673,7 @@ const PRESETS = {
     "webgpu.canvasFormat": "bgra8unorm",
   },
   "vivaldi-79-mac": {
+    "identity.platform": "MacIntel",
     "identity.customUA": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Vivaldi/7.9.3970.64",
     "identity.uaDataMode": "normal",
     "clientHints.mode": "set",
@@ -672,6 +691,7 @@ const PRESETS = {
     "webgpu.canvasFormat": "rgba8unorm",
   },
   "vivaldi-79-linux": {
+    "identity.platform": "Linux x86_64",
     "identity.customUA": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Vivaldi/7.9.3970.64",
     "identity.uaDataMode": "normal",
     "clientHints.mode": "set",
@@ -690,6 +710,7 @@ const PRESETS = {
   },
   // ── Edge ──
   "edge-148-win": {
+    "identity.platform": "Win32",
     "identity.customUA": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
     "identity.uaDataMode": "normal",
     "clientHints.mode": "set",
@@ -708,6 +729,7 @@ const PRESETS = {
   },
   // ── Firefox (no Sec-CH-UA; no userAgentData) ──
   "firefox-142-win": {
+    "identity.platform": "Win32",
     "identity.customUA": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0",
     "identity.uaDataMode": "remove",
     "clientHints.mode": "remove",
@@ -715,6 +737,7 @@ const PRESETS = {
     "webgl.renderer": "Mozilla",
   },
   "firefox-142-mac": {
+    "identity.platform": "MacIntel",
     "identity.customUA": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.7; rv:142.0) Gecko/20100101 Firefox/142.0",
     "identity.uaDataMode": "remove",
     "clientHints.mode": "remove",
@@ -723,6 +746,7 @@ const PRESETS = {
   },
   // ── Safari (no Sec-CH-UA; no userAgentData) ──
   "safari-17-mac": {
+    "identity.platform": "MacIntel",
     "identity.customUA": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
     "identity.uaDataMode": "remove",
     "clientHints.mode": "remove",
@@ -731,7 +755,31 @@ const PRESETS = {
   },
 };
 
-const $presetSelector = document.getElementById("preset-selector");
+function applyPresetSelection() {
+  if (!$presetSelector) return;
+  const key = normalizeDomain(currentDomain);
+  const matchKey = findParentKey(siteOverrides, key);
+  const values = {
+    ...globalDefaultPreset?.values,
+    ...(matchKey ? siteOverrides[matchKey].values : {}),
+  };
+  const presetId = Object.keys(PRESETS).find(id =>
+    Object.entries(PRESETS[id]).every(([name, value]) => values[name] === value)
+  );
+  const hasPresetValues = Object.values(PRESETS).some(preset =>
+    Object.keys(preset).some(name => values[name] !== undefined)
+  );
+  $presetSelector.value = presetId || "";
+  $presetSelector.querySelector('option[value=""]').textContent =
+    hasPresetValues ? "Custom settings" : "Apply a preset";
+  $presetSelector.disabled = !key;
+  if ($makeDefaultBtn) {
+    const isDefault = !!presetId && globalDefaultPreset?.id === presetId;
+    $makeDefaultBtn.disabled = !key || !presetId || isDefault;
+    $makeDefaultBtn.textContent = isDefault ? "Default" : "Make Default";
+  }
+}
+
 $presetSelector?.addEventListener("change", () => {
   const presetId = $presetSelector.value;
   if (!presetId || !PRESETS[presetId]) return;
@@ -745,12 +793,31 @@ $presetSelector?.addEventListener("change", () => {
   for (const [k, v] of Object.entries(PRESETS[presetId])) {
     siteOverrides[key].values[k] = v;
   }
-  chrome.storage.local.set({ siteOverrides });
+  chrome.storage.local.set({ siteOverrides }, () => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to save browser preset:", chrome.runtime.lastError.message);
+      return;
+    }
+    if (activeTabId) chrome.tabs.reload(activeTabId);
+  });
   applyToggleStates();
-  if (activeTabId) chrome.tabs.reload(activeTabId);
-  // Reset the selector to its placeholder so re-picking the same
-  // preset re-applies it (useful after manual tweaks).
-  $presetSelector.value = "";
+});
+
+$makeDefaultBtn?.addEventListener("click", () => {
+  const presetId = $presetSelector.value;
+  if (!presetId || !PRESETS[presetId]) return;
+  const nextDefault = { id: presetId, values: { ...PRESETS[presetId] } };
+  $makeDefaultBtn.disabled = true;
+  chrome.storage.local.set({ globalDefaultPreset: nextDefault }, () => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to save global default preset:", chrome.runtime.lastError.message);
+      applyToggleStates();
+      return;
+    }
+    globalDefaultPreset = nextDefault;
+    applyToggleStates();
+    if (activeTabId) chrome.tabs.reload(activeTabId);
+  });
 });
 
 // ── Reset / manage buttons ────────────────────────────────────────────
@@ -786,7 +853,7 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   if (!tab) return;
   activeTabId = tab.id;
   const url = tab.url || "";
-  try { currentDomain = new URL(url).hostname; } catch { currentDomain = ""; }
+  try { currentDomain = isToggleableUrl(url) ? new URL(url).hostname : ""; } catch { currentDomain = ""; }
 
   if (!isToggleableUrl(url)) {
     $url.textContent = "(masking not available on this page)";

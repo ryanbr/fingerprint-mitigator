@@ -26,13 +26,13 @@
     return null;
   }
 
-  chrome.storage.local.get(["siteOverrides"], (s) => {
+  chrome.storage.local.get(["siteOverrides", "globalDefaultPreset"], (s) => {
     const ov = lookupOverrides(s.siteOverrides, hostname) || {};
     const payload = {
       // {  "hardware.usb": false, "identity.brave": false, ... }
       subChecks: ov.subChecks || {},
       // { "network.effectiveType": "3g", "network.downlink": 5, ... }
-      values: ov.values || {},
+      values: { ...s.globalDefaultPreset?.values, ...ov.values },
     };
     document.dispatchEvent(new CustomEvent("__fpmit_settings", {
       detail: JSON.stringify(payload),

@@ -58,6 +58,10 @@
       cursor: pointer;
     }
     .theme-btn:hover { background: var(--border); color: var(--text); }
+    .preset-controls { display: flex; gap: 6px; }
+    #preset-selector { flex: 1; min-width: 0; }
+    #make-default { flex-shrink: 0; font-size: 12px; white-space: nowrap; }
+    #make-default:disabled { opacity: 0.5; cursor: default; }
     /* Quick-access power icon — same role as the master button below,
        but reachable without scrolling. Red when site is disabled. */
     .power-btn.is-off {
@@ -389,8 +393,9 @@
   <div class="toggle-row">
     <div style="flex:1">
       <div class="label" style="margin-bottom:4px">Browser preset</div>
-      <div class="desc" style="margin-bottom:6px">Picking a preset overwrites UA / Sec-CH-UA / WebGL / etc. for this site.</div>
-      <select id="preset-selector" style="width:100%; padding:4px 6px; font-size:13px; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:4px">
+      <div class="desc" style="margin-bottom:6px">Pick a preset for this site, or make it the global default. Site overrides take priority.</div>
+      <div class="preset-controls">
+      <select id="preset-selector" aria-label="Browser preset" style="padding:4px 6px; font-size:13px; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:4px">
         <option value="">— Apply a preset —</option>
         <optgroup label="Chrome">
           <option value="chrome-148-win">Chrome 148 / Windows</option>
@@ -414,6 +419,8 @@
           <option value="safari-17-mac">Safari 17 / macOS</option>
         </optgroup>
       </select>
+      <button id="make-default" type="button" class="theme-btn" title="Use this preset by default on all sites without overriding per-site settings" disabled>Make Default</button>
+      </div>
     </div>
   </div>
 
@@ -427,7 +434,7 @@
   <div class="toggle-row sub-toggle expand-row" data-expand="identity">
     <div>
       <div class="label"><span class="caret">▶</span> Identity masking</div>
-      <div class="desc"><code>navigator.brave</code>, brands, vendor globals, UA tokens</div>
+      <div class="desc"><code>navigator.brave</code>, brands, vendor globals, UA tokens, platform</div>
     </div>
     <div class="toggle" id="cat-identity" role="switch" aria-checked="true" tabindex="0" data-category="identity"></div>
   </div>
@@ -451,6 +458,74 @@
     <div class="sub-check-row">
       <span class="sub-check-label">Block vendor schemes (<code>vivaldi://</code>, <code>brave://</code>, …)</span>
       <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="identity.protocolBlock"></div>
+    </div>
+    <div class="sub-check-row">
+      <span class="sub-check-label">Override <code>navigator.platform</code></span>
+      <div class="toggle on" role="switch" tabindex="0" data-subcheck-key="identity.platform"></div>
+    </div>
+    <div class="sub-check-row">
+      <label class="sub-check-label" for="identity-platform">Platform</label>
+      <input id="identity-platform" type="text" value="" data-value-key="identity.platform" list="platform-suggestions" placeholder="(preset native)" title="Enter any string. Blank preserves the native platform. Suggestions include historical values and may not reflect current browsers." style="width:160px">
+      <datalist id="platform-suggestions">
+        <option value="Android"></option>
+        <option value="Linux"></option>
+        <option value="iPhone"></option>
+        <option value="iPod"></option>
+        <option value="iPad"></option>
+        <option value="iPhone Simulator"></option>
+        <option value="iPod Simulator"></option>
+        <option value="iPad Simulator"></option>
+        <option value="Macintosh"></option>
+        <option value="MacIntel"></option>
+        <option value="MacPPC"></option>
+        <option value="Mac68K"></option>
+        <option value="Pike v7.6 release 92"></option>
+        <option value="Pike v7.8 release 517"></option>
+        <option value="BlackBerry"></option>
+        <option value="FreeBSD"></option>
+        <option value="FreeBSD i386"></option>
+        <option value="FreeBSD amd64"></option>
+        <option value="Linux aarch64"></option>
+        <option value="Linux armv5tejl"></option>
+        <option value="Linux armv6l"></option>
+        <option value="Linux armv7l"></option>
+        <option value="Linux armv8l"></option>
+        <option value="Linux i686"></option>
+        <option value="Linux i686 on x86_64"></option>
+        <option value="Linux i686 X11"></option>
+        <option value="Linux MSM8960_v3.2.1.1_N_R069_Rev:18"></option>
+        <option value="Linux ppc64"></option>
+        <option value="Linux x86_64"></option>
+        <option value="Linux x86_64 X11"></option>
+        <option value="OS/2"></option>
+        <option value="Pocket PC"></option>
+        <option value="Windows"></option>
+        <option value="Win16"></option>
+        <option value="Win32"></option>
+        <option value="WinCE"></option>
+        <option value="New Nintendo 3DS"></option>
+        <option value="Nintendo DSi"></option>
+        <option value="Nintendo 3DS"></option>
+        <option value="Nintendo Wii"></option>
+        <option value="Nintendo WiiU"></option>
+        <option value="OpenBSD amd64"></option>
+        <option value="Nokia_Series_40"></option>
+        <option value="S60"></option>
+        <option value="Symbian"></option>
+        <option value="Symbian OS"></option>
+        <option value="PalmOS"></option>
+        <option value="webOS"></option>
+        <option value="SunOS"></option>
+        <option value="SunOS i86pc"></option>
+        <option value="SunOS sun4u"></option>
+        <option value="PLAYSTATION 3"></option>
+        <option value="PlayStation 4"></option>
+        <option value="PSP"></option>
+        <option value="HP-UX"></option>
+        <option value="masking-agent"></option>
+        <option value="WebTV OS"></option>
+        <option value="X11"></option>
+      </datalist>
     </div>
     <div class="sub-check-row">
       <span class="sub-check-label">Custom <code>userAgent</code></span>
@@ -530,6 +605,14 @@
         <option value='"Chrome OS"'>"Chrome OS"</option>
       </select>
     </div>
+  </div>
+
+  <div class="toggle-row sub-toggle">
+    <div>
+      <div class="label">Block website workers</div>
+      <div class="desc">Block new service, dedicated and shared workers via CSP. May break sites. Existing service workers must be cleared separately.</div>
+    </div>
+    <div class="toggle" id="cat-workers" role="switch" aria-checked="true" tabindex="0" data-category="workers" aria-label="Block website workers"></div>
   </div>
 
   <div class="toggle-row sub-toggle expand-row" data-expand="canvas">

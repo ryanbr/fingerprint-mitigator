@@ -127,16 +127,17 @@ function render() {
 }
 
 document.getElementById("reset-all").addEventListener("click", () => {
-  if (!confirm("Reset configuration for every site? Defaults will apply to all sites until you customise them again.")) return;
-  chrome.storage.local.set({ disabledDomains: {}, siteOverrides: {} });
+  if (!confirm("Reset configuration for every site and clear the global default preset? Built-in defaults will apply until you customise them again.")) return;
+  chrome.storage.local.set({ disabledDomains: {}, siteOverrides: {}, globalDefaultPreset: null });
 });
 
 document.getElementById("export").addEventListener("click", () => {
-  chrome.storage.local.get(["disabledDomains", "siteOverrides"], (s) => {
+  chrome.storage.local.get(["disabledDomains", "siteOverrides", "globalDefaultPreset"], (s) => {
     const payload = {
       exportedAt: new Date().toISOString(),
       disabledDomains: s.disabledDomains || {},
       siteOverrides: s.siteOverrides || {},
+      globalDefaultPreset: s.globalDefaultPreset || null,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
